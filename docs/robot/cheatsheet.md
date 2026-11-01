@@ -1,5 +1,8 @@
 # Cheat sheet
 
+Music-triggered dancing: `robotctl dance on`, `robotctl dance status`, `robotctl dance off`;
+[behavior, prerequisites and persistence](../design/music-dance.md).
+
 `robotctl`, which runs on the robot. Every command here was taken from `--help` on the branch that
 ships it, not from memory.
 

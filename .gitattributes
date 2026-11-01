@@ -1,0 +1,2 @@
+# Preserve the upstream class-map bytes and checksum, including its CRLF endings.
+pet-detect/models/yamnet_class_map.csv -text whitespace=cr-at-eol

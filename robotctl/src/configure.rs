@@ -147,7 +147,7 @@ fn apply_for(key: &str) -> Option<Apply> {
         // offering a robotd restart for it would be an edit that appears to do something.
         "update_gate" if name == "boot_deadline_s" => Apply::NextBoot("robot-boot-check"),
         "bus" | "control" | "update_gate" | "policy" | "safety" | "chorale" | "idle"
-        | "theremin" | "pickup" | "audio" => Apply::Restart("robotd"),
+        | "theremin" | "pickup" | "audio" | "dance" => Apply::Restart("robotd"),
         _ => return None,
     })
 }

@@ -104,3 +104,8 @@ way they are, and [`docs/project/`](docs/project/) is what has gone wrong and wh
 ## A note on ducks
 
 No duck was harmed in the making of this robot. Several were consulted.
+
+## Music dance preview
+
+Try [music-reactive dancing in MuJoCo](demos/music-dance/README.md), with audible playback and
+the included demo track. This opt-in feature is simulation-validated; hardware validation is pending.

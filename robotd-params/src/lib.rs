@@ -196,6 +196,7 @@ pub struct Params {
     pub policy: PolicyParams,
     pub safety: SafetyParams,
     pub audio: AudioParams,
+    pub dance: DanceParams,
     pub theremin: ThereminParams,
     pub pickup: PickupParams,
     pub head_imu: HeadImuParams,
@@ -4824,5 +4825,23 @@ mod tests {
         assert!(!read("not toml ["));
         std::fs::remove_file(&path).expect("remove");
         assert!(!PolicyParams::community_allowed(&path));
+    }
+}
+
+/// Autonomous music dance. Activation is opt-in and persists in the user layer.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DanceParams {
+    pub enabled: bool,
+    pub footwork: bool,
+    pub model: PathBuf,
+}
+impl Default for DanceParams {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            footwork: true,
+            model: PathBuf::from("/opt/robot/daemon/current/models/music_yamnet.onnx"),
+        }
     }
 }

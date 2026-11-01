@@ -593,6 +593,18 @@ pub const REGISTRY: &[Entry] = &[
         Kind::Float,
         "…and ends below this one (hysteresis)",
     ),
+    // ── [dance] ──────────────────────────────────────────────────────────────
+    feature(
+        "dance.enabled",
+        Kind::Bool,
+        "Autonomously dance to music when idle",
+    ),
+    feature(
+        "dance.footwork",
+        Kind::Bool,
+        "Small rhythmic steps and turns around the starting point",
+    ),
+    entry("dance.model", Kind::Text, "YAMNet ONNX classifier"),
     // ── [media] ──────────────────────────────────────────────────────────────
     feature(
         "media.source",
@@ -1319,6 +1331,8 @@ mod tests {
                 "audio.enabled",
                 "audio.greet",
                 "audio.pet_detect",
+                "dance.enabled",
+                "dance.footwork",
                 "media.source",
                 "media.quality",
                 // The six one-shot buttons. Front-page keys because "what does this button do"

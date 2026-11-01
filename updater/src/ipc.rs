@@ -931,6 +931,8 @@ impl Server {
             // the same either way: not this daemon.
             | Call::PadBindings
             | Call::PadBind(_)
+            | Call::RobotDance
+            | Call::RobotDanceSet(_)
             | Call::RobotSkills
             | Call::RobotSetSkill(_)
             | Call::RobotRemoveSkill(_) => Response::err(

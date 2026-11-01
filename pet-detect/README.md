@@ -1,5 +1,7 @@
 # pet-detect
 
+Autonomous music dance is documented in [music-dance.md](../docs/design/music-dance.md).
+
 A tiny audio classifier that hears when the robot's head is being scratched (the onboard
 mic sits there). ~20 KB CNN over 40-band log-mel windows, sub-millisecond inference.
 

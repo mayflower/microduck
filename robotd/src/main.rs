@@ -20,6 +20,9 @@
 
 mod chorale;
 mod control;
+mod dance;
+mod dance_gait;
+mod dance_motion;
 mod head_imu;
 mod idle_head;
 mod intents;
@@ -607,6 +610,9 @@ fn drop_unloadable_overrides_with(
 }
 
 struct RobotState {
+    dance_enabled: Arc<AtomicBool>,
+    music: pet_detect::music::LatestMusic,
+    dance_status: std::sync::Mutex<proto::DanceStatus>,
     /// Epoch for every timestamp below. `Instant` so the clock cannot go backwards.
     started: Instant,
     ticks: AtomicU64,
@@ -799,6 +805,14 @@ impl RobotState {
         force_busy: bool,
     ) -> Self {
         Self {
+            dance_enabled: Arc::new(AtomicBool::new(params.dance.enabled)),
+            music: Arc::new(arc_swap::ArcSwapOption::empty()),
+            dance_status: std::sync::Mutex::new(proto::DanceStatus {
+                enabled: params.dance.enabled,
+                state: "waiting".into(),
+                bpm: None,
+                reason: Some("initializing".into()),
+            }),
             started: Instant::now(),
             ticks: AtomicU64::new(0),
             missed: AtomicU64::new(0),
@@ -2360,33 +2374,34 @@ async fn control_loop<T: RobotIo>(
         .audio
         .enabled
         .then(|| sound::Sound::new(params.audio.bank.clone(), audio.playback.clone()));
-    let pet: Option<pet_detect::worker::PetHandle> = if params.audio.enabled
-        && params.audio.pet_detect_resolved(params.policy.mode)
-        && let Some(model) = params.audio.pet_model_resolved()
-        && model.exists()
-    {
-        match pet_detect::worker::PetHandle::spawn(pet_detect::worker::PetConfig {
-            alsa_device: audio.capture.clone(),
-            model_path: model.clone(),
-            enter_threshold: params.audio.pet_enter_threshold,
-            exit_threshold: params.audio.pet_exit_threshold,
-        }) {
-            Ok(handle) => {
-                tracing::warn!(model = %model.display(), "petting detection listening");
-                Some(handle)
-            }
-            Err(e) => {
-                // Not unhealthy: the classifier is a feature, not the robot. A missing
-                // model on a release that ships one is caught by the packaging tripwires.
-                tracing::warn!(error = %e, "petting detection unavailable");
-                None
-            }
-        }
+    let pet_config = if params.audio.pet_detect_resolved(params.policy.mode) {
+        params
+            .audio
+            .pet_model_resolved()
+            .filter(|p| p.exists())
+            .map(|model| pet_detect::worker::PetConfig {
+                alsa_device: audio.capture.clone(),
+                model_path: model,
+                enter_threshold: params.audio.pet_enter_threshold,
+                exit_threshold: params.audio.pet_exit_threshold,
+            })
     } else {
-        // Configured on but nothing to run: a bench robotd, a board that predates the
-        // model, or audio off. Quietly so on purpose — the mic is optional equipment.
         None
     };
+    let pet = if params.audio.enabled {
+        pet_detect::worker::PetHandle::spawn_shared(
+            pet_config,
+            audio.capture.clone(),
+            Some(params.dance.model.clone()),
+            state.music.clone(),
+            state.dance_enabled.clone(),
+        )
+        .map_err(|e| tracing::warn!(error=%e,"audio unavailable"))
+        .ok()
+    } else {
+        None
+    };
+    let mut dancer = dance::Dance::new(params.dance.footwork);
 
     // Pick-up detection (`[pickup]`). Off by default, and then this is `None` and nothing in
     // the loop below loads, scores or pauses anything. A model that will not load is a
@@ -3245,6 +3260,7 @@ async fn control_loop<T: RobotIo>(
         // Still: the policy has the robot, nothing asks it to move or is moving it, nobody has
         // steered the head lately, and it is not singing (the chorale owns the head then).
         let still = was_driving
+            && !dancer.engaged()
             && !in_limp_fall
             && !pickup_paused
             && twist_target == [0.0; 3]
@@ -3266,7 +3282,7 @@ async fn control_loop<T: RobotIo>(
             0.0
         };
         let idle_offset = idle.head;
-        let command = PolicyCommand {
+        let mut command = PolicyCommand {
             twist: twist_ema,
             // The chorale's sway rides on top of whatever the head was asked to do, computed
             // last tick (20 ms stale, invisible at sway speed) and slewed to zero when the
@@ -3636,6 +3652,63 @@ async fn control_loop<T: RobotIo>(
             1.0
         };
 
+        let position = odometry.position();
+        if let Some(sample) = fresh.as_ref() {
+            dancer.update_contacts(odometry.foot_clearance(), sample.positions[6]);
+        }
+        let pose_valid = dancer.update_odometry([position[0], position[1], odometry.yaw()]);
+        let eligible = pose_valid
+            && policy_cfg.mode == Mode::Walk
+            && pickup_watch.is_some()
+            && driving
+            && fresh.is_some()
+            && safety.imu_ready()
+            && snapshot.enabled
+            && !safety.fallen()
+            && !in_limp_fall
+            && !pickup_paused
+            && !snapshot.pose.active
+            && !powered_off
+            && pending_swap.is_none()
+            && mode_change.is_none()
+            && shutdown_sit.is_none()
+            && shutdown_rest.is_none()
+            && twist_target == [0.0; 3]
+            && twist_ema.iter().all(|v| v.abs() < 1e-3)
+            && controller.as_ref().is_some_and(|c| {
+                !c.busy()
+                    && !c.is_sitting()
+                    && matches!(
+                        c.driving(),
+                        Some(control::Driving::Stand | control::Driving::Walk)
+                    )
+            })
+            && !theremin.as_ref().is_some_and(|t| t.active())
+            && !chorale.as_ref().is_some_and(|c| c.active());
+        let music = state.music.load_full();
+        let (overlay, status) = dancer.tick(
+            tick_start,
+            music.as_deref(),
+            state.dance_enabled.load(Ordering::Relaxed),
+            eligible,
+            intents.manual_age(),
+        );
+        if let Ok(mut slot) = state.dance_status.try_lock() {
+            *slot = status;
+        }
+        let dance_active = overlay.head.iter().any(|v| v.abs() > 1e-8)
+            || overlay.twist.iter().any(|v| v.abs() > 1e-8)
+            || overlay.body.roll.abs() > 1e-8
+            || overlay.body.pitch.abs() > 1e-8;
+        if dance_active {
+            command.head = overlay.head;
+            command.body = overlay.body;
+            command.twist = overlay.twist;
+            // Autonomous audio/odometry freshness owns this velocity. A stale
+            // gamepad keepalive must not label the dance as a deadman refusal.
+            limits.retain(|limit| *limit != duck_control::safety::Limit::Deadman);
+        }
+
         let (mut targets, gain, moving, policy_label) = match (driving, sensors.as_ref()) {
             // The limp-fall sequence, before anything else — `driving` is false throughout,
             // so without this it would fall through to the hold branch and the robot would
@@ -3692,14 +3765,28 @@ async fn control_loop<T: RobotIo>(
             }
             (true, Some(sensors)) => {
                 let controller = controller.as_mut().expect("driving implies a controller");
-                match controller.step(sensors, &command, snapshot.pose.active, dt, scale_mult) {
-                    Ok(step) => (
-                        step.targets,
-                        step.gain,
-                        // A scripted move is motion whatever the twist says; so is walking.
-                        step.busy || command.twist_magnitude() > 0.0,
-                        step.label,
-                    ),
+                if dancer.planted() {
+                    controller.clear_gait_feedback();
+                }
+                match controller.step(
+                    sensors,
+                    &command,
+                    snapshot.pose.active || (dance_active && !dancer.walking()),
+                    dt,
+                    scale_mult,
+                ) {
+                    Ok(mut step) => {
+                        if dance_active {
+                            dancer.apply_footwork(&mut step.targets);
+                        }
+                        (
+                            step.targets,
+                            step.gain,
+                            // A scripted move is motion whatever the twist says; so is walking.
+                            step.busy || dance_active || command.twist_magnitude() > 0.0,
+                            step.label,
+                        )
+                    }
                     Err(e) => {
                         tracing::warn!(error = %e, "inference failed; holding");
                         (hold, policy_cfg.gain, false, "held".into())
@@ -5201,7 +5288,61 @@ fn dispatch(
     id: proto::Id,
     call: &proto::Call,
 ) -> proto::Response {
+    if matches!(
+        call,
+        proto::Call::RobotDo(_)
+            | proto::Call::RobotStop
+            | proto::Call::RobotInit
+            | proto::Call::RobotRelax
+            | proto::Call::RobotSetMode(_)
+            | proto::Call::RobotEnable(_)
+            | proto::Call::RobotRest
+            | proto::Call::RobotLook(_)
+            | proto::Call::RobotTheremin(_)
+            | proto::Call::RobotChorale(_)
+    ) {
+        intents.mark_manual();
+    }
     match call {
+        proto::Call::RobotDance => {
+            let mut status = state
+                .dance_status
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            let enabled = state.dance_enabled.load(Ordering::Relaxed);
+            if status.enabled != enabled {
+                status = proto::DanceStatus {
+                    enabled,
+                    state: "waiting".into(),
+                    bpm: None,
+                    reason: Some("initializing".into()),
+                };
+            }
+            if !status.enabled {
+                status.state = "disabled".into();
+                status.bpm = None;
+                status.reason = Some("disabled".into());
+            }
+            proto::Response::ok(Some(id), &status)
+        }
+        proto::Call::RobotDanceSet(p) => {
+            let saved = (|| -> Result<(), String> {
+                let mut model = robotd_params::edit::Model::load(&state.config_path)?;
+                model.edit(
+                    robotd_params::registry::entry_for("dance.enabled").expect("registry"),
+                    if p.enabled { "true" } else { "false" },
+                )?;
+                model.save()
+            })();
+            match saved {
+                Ok(()) => {
+                    state.dance_enabled.store(p.enabled, Ordering::Relaxed);
+                    proto::Response::ok(Some(id), &proto::IntentResult::accepted())
+                }
+                Err(e) => proto::Response::ok(Some(id), &proto::IntentResult::refused(e)),
+            }
+        }
         proto::Call::RobotMove(_)
         | proto::Call::RobotHead(_)
         | proto::Call::RobotPose(_)
@@ -5875,6 +6016,47 @@ mod tests {
         let params = Params::load(&path, true).expect("valid config");
         let state = Arc::new(RobotState::new(&params, &path, false, false));
         (dir, state)
+    }
+
+    #[test]
+    fn dance_setting_is_persistent_and_does_not_enable_motors() {
+        let (_dir, state) = state_over("");
+        let intents = Intents::new();
+        for enabled in [true, false] {
+            let response = dispatch(
+                &state,
+                &intents,
+                proto::Id::Number(1),
+                &proto::Call::RobotDanceSet(proto::DanceSetParams { enabled }),
+            );
+            assert!(
+                response
+                    .result_as::<proto::IntentResult>()
+                    .unwrap()
+                    .accepted
+            );
+            assert_eq!(
+                Params::load(&state.config_path, true)
+                    .unwrap()
+                    .dance
+                    .enabled,
+                enabled
+            );
+            assert_eq!(
+                dispatch(
+                    &state,
+                    &intents,
+                    proto::Id::Number(2),
+                    &proto::Call::RobotDance
+                )
+                .result_as::<proto::DanceStatus>()
+                .unwrap()
+                .enabled,
+                enabled
+            );
+            assert!(!intents.enabled());
+            assert_eq!(intents.take_power_request(), None);
+        }
     }
 
     /// **A new skill needs a duration and an existing one does not**, so a client may send one

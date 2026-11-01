@@ -1,0 +1,56 @@
+{
+  "name": "YAMNet v1",
+  "source_weights": "https://storage.googleapis.com/audioset/yamnet.h5",
+  "source_weights_sha256": "13c3308955bbfaef262f175ac9c40e47b134573a93984f009220dd7cc12a1744",
+  "reference_revision": "fb25c876d54f6e333ccfeb962642e64a87d5cc33",
+  "license": "Apache-2.0",
+  "license_file": "YAMNET-LICENSE",
+  "onnx_sha256": "9937cd311979e1b8519e5b9ac58f80931e273acedea705c36112376bc8f7f8af",
+  "class_map_sha256": "cdf24d193e196d9e95912a2667051ae203e92a2ba09449218ccb40ef787c6df2",
+  "input": {
+    "name": "log_mel",
+    "shape": [
+      1,
+      96,
+      64
+    ],
+    "sample_rate": 16000,
+    "window_samples": 400,
+    "hop_samples": 160,
+    "fft_size": 512,
+    "mel_bands": 64,
+    "mel_min_hz": 125,
+    "mel_max_hz": 7500,
+    "log_offset": 0.001
+  },
+  "output": {
+    "name": "scores",
+    "shape": [
+      1,
+      521
+    ],
+    "music_index": 132
+  },
+  "export": {
+    "script": "scripts/export-music-yamnet.py",
+    "torch": "2.9.1",
+    "opset": 17
+  },
+  "validation": [
+    {
+      "case": "tone",
+      "max_score_error": 3.5762786865234375e-07,
+      "music_score": 0.12441390752792358
+    },
+    {
+      "case": "silence",
+      "max_score_error": 3.060385722619685e-09,
+      "music_score": 0.0
+    },
+    {
+      "case": "noise",
+      "max_score_error": 1.0132789611816406e-06,
+      "music_score": 0.0003921687602996826
+    }
+  ]
+}

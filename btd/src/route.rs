@@ -77,6 +77,7 @@ fn permits(call: &proto::Call) -> bool {
     use proto::Call::*;
     match call {
         // The version handshake. Must be reachable or no client can establish anything.
+        RobotDance | RobotDanceSet(_) => true,
         Hello(_) => true,
 
         // Answered by `btd` itself rather than forwarded. Permitted because it is the one call a
@@ -645,6 +646,8 @@ mod tests {
                 // alternative is an ssh session, which is not a thing an owner has.
                 proto::method::PAD_PAIR,
                 proto::method::PAD_FORGET,
+                // Persistent autonomous behavior is an owner setting, like pairing.
+                proto::method::ROBOT_DANCE_SET,
             ]
         );
     }

@@ -8,6 +8,7 @@
 //! Ported from the prototype's `pet_worker.rs`; `println!` diagnostics became `tracing`.
 
 use std::io::Read;
+use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
@@ -195,6 +196,7 @@ impl SoundSentry {
     }
 }
 
+#[derive(Clone)]
 pub struct PetConfig {
     /// ALSA capture device passed to arecord.
     pub alsa_device: String,
@@ -228,31 +230,69 @@ pub struct PetHandle {
 
 impl PetHandle {
     pub fn spawn(config: PetConfig) -> Result<Self> {
-        // Built here, not in the thread, so a missing model or runtime is an error the
-        // caller sees instead of a worker that dies quietly on its first breath. Behind a
-        // panic catch, because `ort` panics on failures it considers unrecoverable — a
-        // missing libonnxruntime must read as "no mic worker", not a dead daemon.
+        Self::spawn_shared(
+            Some(config.clone()),
+            config.alsa_device,
+            None,
+            Arc::new(arc_swap::ArcSwapOption::empty()),
+            Arc::new(AtomicBool::new(false)),
+        )
+    }
+    pub fn spawn_shared(
+        config: Option<PetConfig>,
+        device: String,
+        music_model: Option<PathBuf>,
+        music: crate::music::LatestMusic,
+        enabled: Arc<AtomicBool>,
+    ) -> Result<Self> {
+        // Petting and music are independent consumers. A broken pet model must not
+        // disable music; ort can panic while loading a missing dynamic runtime.
         let detector = std::panic::catch_unwind(|| {
-            PettingDetector::new(
-                &config.model_path,
-                PettingDetectorConfig {
-                    stride: PettingDetectorConfig::default().stride,
-                    enter_threshold: config.enter_threshold,
-                    exit_threshold: config.exit_threshold,
-                },
-            )
+            config
+                .as_ref()
+                .map(|config| {
+                    PettingDetector::new(
+                        &config.model_path,
+                        PettingDetectorConfig {
+                            stride: PettingDetectorConfig::default().stride,
+                            enter_threshold: config.enter_threshold,
+                            exit_threshold: config.exit_threshold,
+                        },
+                    )
+                })
+                .transpose()
         })
-        .unwrap_or_else(|_| Err(anyhow::anyhow!("the ONNX runtime is not loadable")))?;
+        .unwrap_or_else(|_| Err(anyhow::anyhow!("the ONNX runtime is not loadable")))
+        .unwrap_or_else(|e| {
+            tracing::warn!(error=%e,"pet classifier unavailable; music remains independent");
+            None
+        });
 
         let shutdown = Arc::new(AtomicBool::new(false));
         let (tx, rx) = mpsc::channel();
         let (tx_sound, rx_sound) = mpsc::channel();
         let sd = shutdown.clone();
-        let dev = config.alsa_device.clone();
+        let dev = device;
+        let latest = music.clone();
 
         let join = thread::Builder::new()
             .name("pet-worker".into())
-            .spawn(move || worker_loop(&dev, detector, &tx, &tx_sound, &sd))
+            .spawn(move || {
+                worker_loop(
+                    &dev,
+                    detector,
+                    MusicInput {
+                        model: music_model,
+                        enabled,
+                        latest,
+                    },
+                    Events {
+                        pet: tx,
+                        sound: tx_sound,
+                    },
+                    &sd,
+                )
+            })
             .expect("spawn pet worker");
 
         Ok(Self {
@@ -298,20 +338,63 @@ const RESTART_HEALTHY: Duration = Duration::from_secs(5);
 /// trying (a codec that comes back should be heard) but stops narrating it.
 const RESTART_QUIET_AFTER: u32 = 5;
 
+struct MusicInput {
+    model: Option<PathBuf>,
+    enabled: Arc<AtomicBool>,
+    latest: crate::music::LatestMusic,
+}
+struct Events {
+    pet: Sender<PettingEvent>,
+    sound: Sender<SoundEvent>,
+}
+
 fn worker_loop(
     alsa_device: &str,
-    mut detector: PettingDetector,
-    tx: &Sender<PettingEvent>,
-    tx_sound: &Sender<SoundEvent>,
+    mut detector: Option<PettingDetector>,
+    input: MusicInput,
+    events: Events,
     shutdown: &Arc<AtomicBool>,
 ) {
+    let enabled = &input.enabled;
+    let music = &input.latest;
+    let music_model = &input.model;
+    let mut analyzer: Option<crate::music::Analyzer> = None;
     let mut sentry = SoundSentry::new();
     let mut failures: u32 = 0;
     while !shutdown.load(Ordering::Acquire) {
+        if !enabled.load(Ordering::Relaxed) && detector.is_none() {
+            music.store(None);
+            sleep_unless_shutdown(Duration::from_millis(100), shutdown);
+            continue;
+        }
+        if enabled.load(Ordering::Relaxed) && analyzer.is_none() {
+            if let Some(path) = &music_model {
+                analyzer = std::panic::catch_unwind(|| crate::music::Analyzer::new(path))
+                    .ok()
+                    .and_then(Result::ok);
+            }
+            if analyzer.is_none() && detector.is_none() {
+                tracing::warn!("music model unavailable; retrying in 5 seconds");
+                sleep_unless_shutdown(Duration::from_secs(5), shutdown);
+                continue;
+            }
+        }
+        if let Some(a) = analyzer.as_mut() {
+            a.reset();
+        }
+        let capture_music = enabled.load(Ordering::Relaxed);
         let started = Instant::now();
         match spawn_arecord(alsa_device) {
             Ok(mut c) => {
-                if let Err(e) = pump(&mut c, &mut detector, &mut sentry, tx, tx_sound, shutdown) {
+                if let Err(e) = pump(
+                    &mut c,
+                    &mut detector,
+                    &mut analyzer,
+                    &input,
+                    &mut sentry,
+                    &events,
+                    shutdown,
+                ) {
                     log_restart(failures, &e.to_string());
                 }
                 let _ = c.kill();
@@ -319,7 +402,9 @@ fn worker_loop(
             }
             Err(e) => log_restart(failures, &e.to_string()),
         }
-        if started.elapsed() >= RESTART_HEALTHY {
+        music.store(None);
+        if capture_music != enabled.load(Ordering::Relaxed) || started.elapsed() >= RESTART_HEALTHY
+        {
             failures = 0;
             continue;
         }
@@ -375,31 +460,82 @@ fn spawn_arecord(device: &str) -> Result<Child> {
 
 fn pump(
     child: &mut Child,
-    detector: &mut PettingDetector,
+    detector: &mut Option<PettingDetector>,
+    analyzer: &mut Option<crate::music::Analyzer>,
+    input: &MusicInput,
     sentry: &mut SoundSentry,
-    tx: &Sender<PettingEvent>,
-    tx_sound: &Sender<SoundEvent>,
+    events: &Events,
     shutdown: &Arc<AtomicBool>,
 ) -> Result<()> {
+    let enabled = &input.enabled;
+    let music = &input.latest;
     let mut stdout = child
         .stdout
         .take()
         .ok_or_else(|| anyhow::anyhow!("arecord stdout missing"))?;
-    let mut buf = [0u8; 4096];
+    // The pipe is ours alone; O_NONBLOCK permits shutdown and stalled-capture detection.
+    let fd = stdout.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    anyhow::ensure!(
+        flags >= 0 && unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } >= 0,
+        "could not set capture pipe nonblocking"
+    );
+    let capture_music = enabled.load(Ordering::Relaxed);
+    let started = Instant::now();
+    let mut last_audio = started;
+    let mut captured = 0u64;
+    let mut pending_byte = None;
+    let mut buf = [0u8; 1024];
     let mut i16_buf: Vec<i16> = Vec::with_capacity(2048);
 
     while !shutdown.load(Ordering::Acquire) {
-        let n = stdout.read(&mut buf)?;
+        if capture_music != enabled.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        let n = match stdout.read(&mut buf) {
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                anyhow::ensure!(
+                    last_audio.elapsed() < Duration::from_secs(2),
+                    "microphone stalled"
+                );
+                // Wait for PCM rather than waking periodically while the pipe is empty.
+                // The bounded timeout keeps shutdown responsive even if arecord wedges.
+                let mut readable = libc::pollfd {
+                    fd,
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
+                let ready = unsafe { libc::poll(&mut readable, 1, 100) };
+                if ready < 0 {
+                    let error = std::io::Error::last_os_error();
+                    if error.kind() != std::io::ErrorKind::Interrupted {
+                        return Err(error.into());
+                    }
+                }
+                continue;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e.into()),
+        };
+        last_audio = Instant::now();
         if n == 0 {
             return Err(anyhow::anyhow!("arecord stdout closed (EOF)"));
         }
-        if !n.is_multiple_of(2) {
-            return Err(anyhow::anyhow!("odd byte count from arecord"));
-        }
         i16_buf.clear();
-        for chunk in buf[..n].as_chunks::<2>().0 {
-            i16_buf.push(i16::from_le_bytes(*chunk));
+        for &byte in &buf[..n] {
+            if let Some(lo) = pending_byte.take() {
+                i16_buf.push(i16::from_le_bytes([lo, byte]));
+            } else {
+                pending_byte = Some(byte);
+            }
         }
+        captured += i16_buf.len() as u64;
+        let audio_at = started + Duration::from_secs_f64(captured as f64 / 16000.0);
+        anyhow::ensure!(
+            Instant::now().saturating_duration_since(audio_at) < Duration::from_millis(500),
+            "audio analysis cannot keep up with capture"
+        );
         let samples = i16_to_f32(&i16_buf);
         // Read before the sentry sees this batch, deliberately: the answer is a one-second
         // hangover rather than a verdict on these 128 ms, so it spans batches and reading it
@@ -408,9 +544,19 @@ fn pump(
         // inference — see below. Only one of the two can go first, and this is the one whose
         // ordering does not matter.
         let audible = sentry.audible();
-        let (events, _p) = detector.push_samples(&samples, audible)?;
-        for ev in events {
-            if tx.send(ev).is_err() {
+        if let Some(a) = analyzer
+            .as_mut()
+            .filter(|_| enabled.load(Ordering::Relaxed))
+        {
+            let frame = a.push(&samples, audio_at.min(Instant::now()))?;
+            music.store(Some(Arc::new(frame)));
+        }
+        let (pet_events, _p) = match detector {
+            Some(d) => d.push_samples(&samples, audible)?,
+            None => (Vec::new(), None),
+        };
+        for ev in pet_events {
+            if events.pet.send(ev).is_err() {
                 // Receiver dropped — the daemon is shutting down.
                 return Ok(());
             }
@@ -423,9 +569,13 @@ fn pump(
         // re-arm it, leaving the sentry emitting head-scratch noise as `Voice` events until
         // the probability finally fell below the exit threshold.
         let mut sounds = Vec::new();
-        sentry.push(&samples, detector.is_petting(), &mut sounds);
+        sentry.push(
+            &samples,
+            detector.as_ref().is_some_and(|d| d.is_petting()),
+            &mut sounds,
+        );
         for sev in sounds {
-            let _ = tx_sound.send(sev);
+            let _ = events.sound.send(sev);
         }
     }
     Ok(())
@@ -434,6 +584,43 @@ fn pump(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stalled_capture_does_not_block_shutdown() {
+        let mut child = Command::new("sh")
+            .args(["-c", "exec sleep 5"])
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let stop = shutdown.clone();
+        let request = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(20));
+            stop.store(true, Ordering::Release);
+        });
+        let (tx, _) = mpsc::channel();
+        let (sound, _) = mpsc::channel();
+        let latest = Arc::new(arc_swap::ArcSwapOption::empty());
+        let start = Instant::now();
+        let result = pump(
+            &mut child,
+            &mut None,
+            &mut None,
+            &MusicInput {
+                model: None,
+                enabled: Arc::new(AtomicBool::new(true)),
+                latest,
+            },
+            &mut SoundSentry::new(),
+            &Events { pet: tx, sound },
+            &shutdown,
+        );
+        let _ = child.kill();
+        let _ = child.wait();
+        request.join().unwrap();
+        assert!(result.is_ok());
+        assert!(start.elapsed() < Duration::from_secs(1));
+    }
 
     /// One sentry frame of a constant amplitude, pushed through as the mic would deliver it.
     fn frames(sentry: &mut SoundSentry, amplitude: f32, count: u32) {

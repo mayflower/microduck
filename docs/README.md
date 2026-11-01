@@ -21,6 +21,7 @@ docs give the reasoning and point at it.
 | [`cheatsheet-dev.md`](robot/cheatsheet-dev.md) | The commands that need a dev board: branch builds, candidates, dev pushes. |
 | [`dev-push.md`](robot/dev-push.md) | Build on your machine and install on the board over ssh, with no CI run. |
 | [`simulation.md`](robot/simulation.md) | The simulated duck: `scripts/duck-sim`, the real daemons against a MuJoCo body, one duck or several in containers. |
+| [Music dance demo](../demos/music-dance/README.md) | Reproduce music-reactive dancing with MuJoCo, audible playback and the included track. |
 | [`telemetry.md`](robot/telemetry.md) | The anonymous usage data a duck sends, what it never sends, and how to turn it off. |
 | [`duckctl.md`](robot/duckctl.md) | Every `duckctl` command — the robot from a laptop, over Bluetooth. |
 | [`install-dev.md`](robot/install-dev.md) | Setting up a board for development, from nothing. |
@@ -42,6 +43,7 @@ own the mechanism is the bug.
 | | |
 |---|---|
 | [`architecture.md`](design/architecture.md) | The service split, the IPC contract, state ownership, safety and authority. |
+| [`music-dance.md`](design/music-dance.md) | Autonomous dance: activation, audio/beat analysis, ownership, model provenance and offline checks. |
 | [`robotd-design.md`](design/robotd-design.md) | The control loop: the Dynamixel bus and who owns the port, the model, sensing, observations, policy, safety — and what else hangs off the tick. |
 | [`updater-design.md`](design/updater-design.md) | The update engine: verification, atomic swap, health gate, rollback, release format. |
 | [`policy-channel-design.md`](design/policy-channel-design.md) | Where the ONNX policies come from: the `policies` component, trying someone else's, and what `reset` puts back. |
@@ -60,6 +62,7 @@ Dated records rather than reference. They describe a moment, and go stale on pur
 
 | | |
 |---|---|
+| [`music-dance-validation.md`](project/music-dance-validation.md) | Pre-hardware music-dance checks, simulation results and remaining acceptance work. |
 | [`roadmap.md`](project/roadmap.md) | Milestones, and what works today versus what is designed. |
 | [`ci-setup.md`](project/ci-setup.md) | One-time setup for the release pipeline: keys, secrets, rotation. |
 | [`install-path-gap.md`](project/install-path-gap.md) | Why four install-path bugs reached a board, and what closed it. Closed — the rule it taught is [`updater-design.md`](design/updater-design.md) §9.1. |

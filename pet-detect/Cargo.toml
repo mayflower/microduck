@@ -21,7 +21,14 @@ path = "src/bin/detect.rs"
 name = "pet-features"
 path = "src/bin/features.rs"
 
+[[bin]]
+name = "music-detect"
+path = "src/bin/music.rs"
+
 [dependencies]
+libc = "0.2"
+arc-swap = "1"
+serde_json.workspace = true
 anyhow = "1"
 clap = { workspace = true, features = ["derive"] }
 hound.workspace = true

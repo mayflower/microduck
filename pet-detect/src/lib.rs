@@ -10,6 +10,7 @@
 //! inference share this file. The arecord worker and the ambient sound sentry from the
 //! prototype's `pet_worker.rs` live in [`worker`].
 
+pub mod music;
 pub mod worker;
 
 use std::f32::consts::PI;
