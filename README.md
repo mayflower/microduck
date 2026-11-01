@@ -61,6 +61,14 @@ recipe, and the export to ONNX that this repo loads.
 <td><b>It picks things up.</b> Beak to the floor, one button.</td>
 <td><b>It gets back up.</b> Knock it over and it stands itself up.</td>
 </tr>
+<tr>
+<td colspan="2">
+  <video src="https://github.com/user-attachments/assets/79454828-8846-43da-bd04-e11e17808aff" controls width="100%"></video>
+</td>
+</tr>
+<tr>
+<td colspan="2"><b>It dances.</b> Steps to music in MuJoCo. <a href="demos/music-dance/README.md">Try the demo.</a></td>
+</tr>
 </table>
 
 It also sits, kicks a ball, rolls forward on command, and quacks in a voice that is its own.
@@ -104,12 +112,3 @@ way they are, and [`docs/project/`](docs/project/) is what has gone wrong and wh
 ## A note on ducks
 
 No duck was harmed in the making of this robot. Several were consulted.
-
-## Music dance preview
-
-Try [music-reactive dancing in MuJoCo](demos/music-dance/README.md), with audible playback and
-the included demo track. This opt-in feature is simulation-validated; hardware validation is pending.
-
-[Watch the 30-second dance video with music](https://github.com/mayflower/microduck/releases/download/music-dance-demo-v1/microduck-music-dance-30s.mp4).
-
-[![Microduck dancing in MuJoCo — click for the 30-second video with sound](https://github.com/mayflower/microduck/releases/download/music-dance-demo-v1/microduck-music-dance-preview.webp)](https://github.com/mayflower/microduck/releases/download/music-dance-demo-v1/microduck-music-dance-30s.mp4)

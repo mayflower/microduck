@@ -10,9 +10,8 @@ The daemon alternates feet once per quarter-note beat and follows a compact curv
 
 ## 30-second preview
 
-<video src="https://github.com/mayflower/microduck/releases/download/music-dance-demo-v1/microduck-music-dance-30s.mp4" controls width="960"></video>
+<video src="https://github.com/user-attachments/assets/79454828-8846-43da-bd04-e11e17808aff" controls width="960"></video>
 
-[Watch or download the video with sound](https://github.com/mayflower/microduck/releases/download/music-dance-demo-v1/microduck-music-dance-30s.mp4).
 720p, 30 fps: two different 15-second simulation takes joined with a camera cut. Each uses
 its recorded motion and soundtrack at normal speed, with no fitted beat shift. The existing
 estimated 80 ms playback delay is retained. The clip is labeled as MuJoCo simulation.
