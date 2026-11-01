@@ -4,7 +4,8 @@
 //! variants, dead skills and dead sensors, all of which are gone. **Read once at startup,
 //! not watched**; live reload is deferred (`docs/design/robotd-design.md` §4.2). That fact
 //! is load-bearing for tooling: *any* change to the file requires a `robotd` restart, so an
-//! editor never has to ask which keys are live.
+//! editor never has to ask which keys are live. `robot.dance.set` is the explicit exception:
+//! it persists [`DanceParams::enabled`] and applies that switch to the running loop.
 //!
 //! It lives outside `releases/<ver>/` so it survives an update *and* a rollback: this is
 //! per-robot configuration, not shipped defaults (`architecture.md` §3).
@@ -1392,6 +1393,24 @@ mod head_imu_tests {
         assert_eq!(HeadImuParams::reader(Board::Zero3), "tofd");
         assert_eq!(HeadImuParams::reader(Board::Beta), "robotd");
         assert_eq!(HeadImuParams::reader(Board::FaceBoardV1), "robotd");
+    }
+}
+
+/// Autonomous music dance. Activation is opt-in and persists in the user layer.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DanceParams {
+    pub enabled: bool,
+    pub footwork: bool,
+    pub model: PathBuf,
+}
+impl Default for DanceParams {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            footwork: true,
+            model: PathBuf::from("/opt/robot/daemon/current/models/music_yamnet.onnx"),
+        }
     }
 }
 
@@ -5037,23 +5056,5 @@ mod tests {
             !Params::default().update_gate.auto_rollback,
             "off unless asked for"
         );
-    }
-}
-
-/// Autonomous music dance. Activation is opt-in and persists in the user layer.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct DanceParams {
-    pub enabled: bool,
-    pub footwork: bool,
-    pub model: PathBuf,
-}
-impl Default for DanceParams {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            footwork: true,
-            model: PathBuf::from("/opt/robot/daemon/current/models/music_yamnet.onnx"),
-        }
     }
 }

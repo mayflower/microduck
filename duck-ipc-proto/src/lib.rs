@@ -486,12 +486,6 @@ pub const JSONRPC_VERSION: &str = "2.0";
 /// ([`OsStatus`]). New routes: an `updaterd` predating them answers METHOD_NOT_FOUND, and a board
 /// whose image has no A/B slots answers [`code::NOT_SUPPORTED`].
 ///
-/// # v48 — autonomous music dance
-///
-/// `robot.dance` reports activation, state, tempo and waiting reason. `robot.dance.set`
-/// persists the opt-in before acknowledging it. Install the matching robotd, robotctl,
-/// transport daemons and bundled music model together. It never enables motor torque.
-///
 /// # v47 — anonymous usage data
 ///
 /// [`method::TELEMETRY_STATUS`] and [`method::TELEMETRY_SET`]: whether the robot shares anonymous
@@ -522,6 +516,12 @@ pub const JSONRPC_VERSION: &str = "2.0";
 /// [`code::SESSIONS_CONNECTED`] while one is connected, unless `interrupt_sessions` is set. A request made
 /// over WebRTC by the only peer connected is exempt. `robot.remoteSessionActive` is gone; it was
 /// `updaterd`'s question, refused to every client.
+///
+/// # v51 — autonomous music dance
+///
+/// `robot.dance` reports activation, state, tempo and waiting reason. `robot.dance.set`
+/// persists the opt-in before acknowledging it. Install the matching robotd, robotctl,
+/// transport daemons and bundled music model together. It never enables motor torque.
 pub const API_VERSION: u32 = 51;
 
 /// The observation width every policy this robot family runs is built against.
@@ -1487,7 +1487,7 @@ impl Call {
     pub fn is_mutating(&self) -> bool {
         matches!(
             self,
-            Call::RobotDanceSet(_) | Call::Apply(_)
+            Call::Apply(_)
                 | Call::Rollback(_)
                 | Call::ResetToGolden(_)
                 | Call::Select(_)
@@ -1499,6 +1499,8 @@ impl Call {
                 | Call::SystemSetName(_)
                 | Call::SystemReboot
                 | Call::SystemSetPairingPin(_)
+                // Permission to move autonomously is a persistent owner setting.
+                | Call::RobotDanceSet(_)
                 // Powering the machine off is at least as disruptive as rebooting it.
                 | Call::RobotShutdown
                 // Bonding a pad to this robot changes what may drive it, which is the most
@@ -1680,9 +1682,10 @@ impl Call {
             // mechanically. It is only worth a comment because the name suggests otherwise.
             Call::PadBindings | Call::PadBind(_) => (Robot, Prompt),
 
+            // The persistent idle-behavior switch also writes configuration.
+            Call::RobotDance | Call::RobotDanceSet(_) => (Robot, Slow),
             // The skill table. `robotd` writes it and reloads itself afterwards, so one call is
             // enough — and it is the daemon that has to accept the result either way.
-            Call::RobotDance | Call::RobotDanceSet(_) => (Robot, Slow),
             Call::RobotSkills | Call::RobotSetSkill(_) | Call::RobotRemoveSkill(_) => (Robot, Slow),
             // Re-sweeps the radio rather than returning the last scan.
             Call::NetScan => (Config, Slow),
@@ -4898,6 +4901,20 @@ pub enum PadPairResult {
     },
 }
 
+/// Persistently enable/disable autonomous music dancing.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DanceSetParams {
+    pub enabled: bool,
+}
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct DanceStatus {
+    pub enabled: bool,
+    pub state: String,
+    pub bpm: Option<f64>,
+    pub reason: Option<String>,
+}
+
 /// One entry in the skill table, as a client sees it and as it is written back.
 ///
 /// **The same shape read and written**, so a client can list, change one field and send it back
@@ -7381,18 +7398,4 @@ mod tests {
             vec!["  https://huggingface.co/a/b/resolve/main/preview.mp4"]
         );
     }
-}
-
-/// Persistently enable/disable autonomous music dancing.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DanceSetParams {
-    pub enabled: bool,
-}
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct DanceStatus {
-    pub enabled: bool,
-    pub state: String,
-    pub bpm: Option<f64>,
-    pub reason: Option<String>,
 }

@@ -292,8 +292,7 @@ impl PetHandle {
                     },
                     &sd,
                 )
-            })
-            .expect("spawn pet worker");
+            })?;
 
         Ok(Self {
             rx,
@@ -343,6 +342,22 @@ struct MusicInput {
     enabled: Arc<AtomicBool>,
     latest: crate::music::LatestMusic,
 }
+const MUSIC_RETRY: Duration = Duration::from_secs(5);
+
+impl MusicInput {
+    fn load_analyzer(&self) -> Option<crate::music::Analyzer> {
+        let path = self.model.as_ref()?;
+        match std::panic::catch_unwind(|| crate::music::Analyzer::new(path))
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("the ONNX runtime is not loadable")))
+        {
+            Ok(analyzer) => Some(analyzer),
+            Err(error) => {
+                tracing::warn!(model = %path.display(), %error, "music model unavailable; retrying in 5 seconds");
+                None
+            }
+        }
+    }
+}
 struct Events {
     pet: Sender<PettingEvent>,
     sound: Sender<SoundEvent>,
@@ -357,7 +372,6 @@ fn worker_loop(
 ) {
     let enabled = &input.enabled;
     let music = &input.latest;
-    let music_model = &input.model;
     let mut analyzer: Option<crate::music::Analyzer> = None;
     let mut sentry = SoundSentry::new();
     let mut failures: u32 = 0;
@@ -368,14 +382,9 @@ fn worker_loop(
             continue;
         }
         if enabled.load(Ordering::Relaxed) && analyzer.is_none() {
-            if let Some(path) = &music_model {
-                analyzer = std::panic::catch_unwind(|| crate::music::Analyzer::new(path))
-                    .ok()
-                    .and_then(Result::ok);
-            }
+            analyzer = input.load_analyzer();
             if analyzer.is_none() && detector.is_none() {
-                tracing::warn!("music model unavailable; retrying in 5 seconds");
-                sleep_unless_shutdown(Duration::from_secs(5), shutdown);
+                sleep_unless_shutdown(MUSIC_RETRY, shutdown);
                 continue;
             }
         }
@@ -483,6 +492,7 @@ fn pump(
     let capture_music = enabled.load(Ordering::Relaxed);
     let started = Instant::now();
     let mut last_audio = started;
+    let mut retry_music_at = started + MUSIC_RETRY;
     let mut captured = 0u64;
     let mut pending_byte = None;
     let mut buf = [0u8; 1024];
@@ -491,6 +501,15 @@ fn pump(
     while !shutdown.load(Ordering::Acquire) {
         if capture_music != enabled.load(Ordering::Relaxed) {
             return Ok(());
+        }
+        if !capture_music && detector.is_none() {
+            return Ok(());
+        }
+        // Petting can keep this capture alive indefinitely. Retry the music
+        // consumer here too, without taking the microphone away from petting.
+        if capture_music && analyzer.is_none() && Instant::now() >= retry_music_at {
+            *analyzer = input.load_analyzer();
+            retry_music_at = Instant::now() + MUSIC_RETRY;
         }
         let n = match stdout.read(&mut buf) {
             Ok(n) => n,
@@ -548,12 +567,29 @@ fn pump(
             .as_mut()
             .filter(|_| enabled.load(Ordering::Relaxed))
         {
-            let frame = a.push(&samples, audio_at.min(Instant::now()))?;
-            music.store(Some(Arc::new(frame)));
+            match a.push(&samples, audio_at.min(Instant::now())) {
+                Ok(frame) => music.store(Some(Arc::new(frame))),
+                Err(error) => {
+                    tracing::warn!(%error, "music inference failed; retrying without interrupting petting");
+                    *analyzer = None;
+                    music.store(None);
+                    retry_music_at = Instant::now() + MUSIC_RETRY;
+                }
+            }
         }
-        let (pet_events, _p) = match detector {
-            Some(d) => d.push_samples(&samples, audible)?,
-            None => (Vec::new(), None),
+        let pet_events = match detector.as_mut().map(|d| d.push_samples(&samples, audible)) {
+            Some(Ok((events, _))) => events,
+            Some(Err(error)) => {
+                tracing::warn!(%error, "pet inference failed; music remains independent");
+                let was_petting = detector.as_ref().is_some_and(|d| d.is_petting());
+                *detector = None;
+                if was_petting {
+                    vec![PettingEvent::End]
+                } else {
+                    Vec::new()
+                }
+            }
+            None => Vec::new(),
         };
         for ev in pet_events {
             if events.pet.send(ev).is_err() {
@@ -584,6 +620,126 @@ fn pump(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires ONNX Runtime >= 1.23; run explicitly with ORT_DYLIB_PATH"]
+    fn a_failing_classifier_does_not_close_the_other_consumer() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        for bad_music in [true, false] {
+            let pet_path = root.join("models/pet_detect.onnx");
+            let music_path = root.join("models/music_yamnet.onnx");
+            // Both are valid ONNX, but each consumer requires a different frontend.
+            let mut detector = Some(
+                PettingDetector::new(
+                    if bad_music { &pet_path } else { &music_path },
+                    PettingDetectorConfig::default(),
+                )
+                .unwrap(),
+            );
+            let mut analyzer = Some(
+                crate::music::Analyzer::new(if bad_music { &pet_path } else { &music_path })
+                    .unwrap(),
+            );
+            let mut child = Command::new("sh")
+                .args(["-c", "exec cat /dev/zero"])
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let shutdown = Arc::new(AtomicBool::new(false));
+            let stop = shutdown.clone();
+            let request = thread::spawn(move || {
+                thread::sleep(Duration::from_millis(500));
+                stop.store(true, Ordering::Release);
+            });
+            let (pet, _pet_rx) = mpsc::channel();
+            let (sound, _sound_rx) = mpsc::channel();
+            let latest = Arc::new(arc_swap::ArcSwapOption::empty());
+            let mut sentry = SoundSentry::new();
+            sentry.audible_frames = u32::MAX;
+            let result = pump(
+                &mut child,
+                &mut detector,
+                &mut analyzer,
+                &MusicInput {
+                    model: Some(music_path),
+                    enabled: Arc::new(AtomicBool::new(true)),
+                    latest: latest.clone(),
+                },
+                &mut sentry,
+                &Events { pet, sound },
+                &shutdown,
+            );
+            let _ = child.kill();
+            let _ = child.wait();
+            request.join().unwrap();
+            assert!(result.is_ok(), "capture failed: {result:?}");
+            if bad_music {
+                assert!(detector.is_some() && analyzer.is_none() && latest.load().is_none());
+            } else {
+                assert!(detector.is_none() && analyzer.is_some() && latest.load().is_some());
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires ONNX Runtime >= 1.23; run explicitly with ORT_DYLIB_PATH"]
+    fn music_model_recovers_while_petting_keeps_capture_alive() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let detector = PettingDetector::new(
+            &root.join("models/pet_detect.onnx"),
+            PettingDetectorConfig::default(),
+        )
+        .unwrap();
+        let latest = Arc::new(arc_swap::ArcSwapOption::empty());
+        let input = MusicInput {
+            model: Some(dir.path().join("restored.onnx")),
+            enabled: Arc::new(AtomicBool::new(true)),
+            latest: latest.clone(),
+        };
+        let mut analyzer = input.load_analyzer();
+        assert!(analyzer.is_none());
+        let mut child = Command::new("sh")
+            .args(["-c", "exec cat /dev/zero"])
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let stop = shutdown.clone();
+        let (pet, _pet_rx) = mpsc::channel();
+        let (sound, _sound_rx) = mpsc::channel();
+        let thread = thread::spawn(move || {
+            let result = pump(
+                &mut child,
+                &mut Some(detector),
+                &mut analyzer,
+                &input,
+                &mut SoundSentry::new(),
+                &Events { pet, sound },
+                &stop,
+            );
+            let _ = child.kill();
+            let _ = child.wait();
+            result
+        });
+        thread::sleep(Duration::from_millis(100));
+        std::fs::copy(
+            root.join("models/music_yamnet.onnx"),
+            dir.path().join("restored.onnx"),
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while latest.load().is_none() && Instant::now() < deadline && !thread.is_finished() {
+            thread::sleep(Duration::from_millis(20));
+        }
+        shutdown.store(true, Ordering::Release);
+        let result = thread.join().unwrap();
+        assert!(result.is_ok(), "capture failed: {result:?}");
+        assert!(
+            latest.load().is_some(),
+            "the same capture must recover music analysis"
+        );
+    }
 
     #[test]
     fn a_stalled_capture_does_not_block_shutdown() {

@@ -77,8 +77,10 @@ fn permits(call: &proto::Call) -> bool {
     use proto::Call::*;
     match call {
         // The version handshake. Must be reachable or no client can establish anything.
-        RobotDance | RobotDanceSet(_) => true,
         Hello(_) => true,
+
+        // Persistent idle behavior is an owner setting. Motor control stays separate.
+        RobotDance | RobotDanceSet(_) => true,
 
         // Answered by `btd` itself rather than forwarded. Permitted because it is the one call a
         // session must be able to make before it has made any other.

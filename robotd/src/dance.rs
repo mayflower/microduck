@@ -251,9 +251,6 @@ impl Dance {
             self.amplitude = 0.0;
             self.phrase_start = None;
             self.output = Command::default();
-            if let Some(footwork) = self.footwork.as_mut() {
-                footwork.reset();
-            }
         }
         self.amplitude = (self.amplitude + if dancing { dt } else { -dt }).clamp(0.0, 1.0);
         if let Some(f) = frame {
@@ -263,6 +260,10 @@ impl Dance {
                 (f.beat + now.duration_since(f.at).as_secs_f64() * f.bpm / 60.0).rem_euclid(1.0);
             let correction = (target - self.phase.rem_euclid(1.0) + 0.5).rem_euclid(1.0) - 0.5;
             self.phase += correction * dt.min(0.1) * 2.0;
+        } else if self.amplitude > 0.0 {
+            // Finish the fade at the last known tempo instead of freezing a
+            // partial swing (or a head nod) until its amplitude reaches zero.
+            self.phase += dt * self.last_bpm / 60.0;
         }
         if dancing && self.phrase_start.is_none() {
             self.phrase_start = Some(self.phase.floor());
@@ -273,6 +274,9 @@ impl Dance {
         if self.amplitude == 0.0 {
             self.gait_ready = false;
             self.contact_clock = crate::dance_gait::ContactClock::default();
+            if let Some(footwork) = self.footwork.as_mut() {
+                footwork.reset();
+            }
         }
         // Finish the head/body ramp in planted standing, then begin a complete
         // swing. Starting halfway through a weak ramped swing added stray steps.
@@ -501,6 +505,34 @@ mod tests {
         let (c, s) = d.tick(at, Some(&frame(at)), true, true, Duration::MAX);
         assert_eq!(c, Command::default());
         assert_eq!(s.state, "acquiring");
+    }
+    #[test]
+    fn music_loss_finishes_the_clock_and_resets_the_previous_dance_area() {
+        let now = Instant::now();
+        let mut d = Dance::new(true);
+        warm(&mut d, now);
+        d.update_odometry([0.6, 0.0, 0.0]);
+        let at = now + Duration::from_millis(2020);
+        d.tick(at, Some(&frame(at)), true, true, Duration::MAX);
+        assert!(d.footwork.as_ref().unwrap().halted());
+        let phase = d.phase;
+        for i in 1..=60 {
+            let at = at + Duration::from_millis(i * 20);
+            let mut f = frame(at);
+            f.music = false;
+            d.tick(at, Some(&f), true, true, Duration::MAX);
+            if i == 1 {
+                assert!(d.phase > phase, "music loss must not freeze a lifted foot");
+            }
+        }
+        assert_eq!(d.amplitude, 0.0);
+        assert!(!d.footwork.as_ref().unwrap().halted());
+        // This is a new dance at the current location, not an escape from the old area.
+        for i in 1..=150 {
+            let at = now + Duration::from_millis(3220 + i * 20);
+            d.tick(at, Some(&frame(at)), true, true, Duration::MAX);
+        }
+        assert!(!d.footwork.as_ref().unwrap().halted());
     }
     #[test]
     fn stale_and_nonfinite_audio_cannot_drive() {

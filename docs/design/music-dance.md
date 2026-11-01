@@ -107,6 +107,12 @@ It fits settled left-contact cycles, leaves out the mean pose and records no use
 policy weights were retrained. This profile was calibrated with VelStand; other gaits and the
 actual motors/floor need their own validation.
 
+Footwork is enabled only when the loaded walking network's SHA-256 matches this profile's
+`policy_sha256` and no separate standing network is installed. The check uses the loaded bytes,
+so renaming a model does not change compatibility, and swapping a policy updates the decision.
+An incompatible setup waits with `unsupported_walk_policy`; it never receives the recorded leg
+offsets. `dance.footwork = false` selects the stationary gesture mode instead.
+
 Walking uses neutral body-pose commands. Its head-pitch command is a pure 10.5° × min(1,120/BPM)³
 cosine pulse on each beat, and gaze follows a slower eight-beat yaw sweep. Rapid lateral
 head flips could provoke extra balance steps. During walking,
@@ -116,13 +122,15 @@ With footwork disabled the original standing body/head sequence stays in use. Bo
 bound head pitch to ±12° and yaw to ±16°, with zero neck pitch, head roll and body-height
 commands. Crossing a measured 50 cm radius from the initial dance position latches
 locomotion off with reason `dance_area_limit`; head gestures continue. Disabling/re-enabling
-or a manual/safety interruption resets that anchor and latch. This is a local odometry bound,
+or a manual/safety interruption resets that anchor and latch. Completing a music-loss fade
+also resets them, so the next acquisition starts a new path at the current location. This is a local odometry bound,
 not obstacle detection or a guarantee against long-term odometry drift.
 
 Amplitude ramps over one second. A final slew limiter bounds head commands to 140°/s, body
 roll to 70°/s and body pitch to 50°/s, including phase corrections and mirrored phrase boundaries.
 The phase tracker follows the estimated beat rather than restarting on each analysis result.
-Beat/music loss fades to neutral over one second. Manual control, ineligibility, disabling and
+Beat/music loss fades to neutral over one second, continuing the last known beat clock so a
+partial swing does not freeze during the fade. Manual control, ineligibility, disabling and
 missing/stale audio revoke the overlay immediately; they bypass the slew limiter so another
 owner takes control on the next tick. Audio older than 500 ms cannot drive it. Active dancing
 counts as motion for the updater's restart gate.
@@ -135,6 +143,11 @@ false`; a failed pet classifier does not disable it. When both petting and dance
 worker parks without opening the capture device. The music model is loaded lazily on its worker
 thread. No FFT, ONNX inference, process I/O or configuration write runs in the motor tick.
 A lock-free latest-value slot publishes analysis results; intermediate results are not queued.
+Model-load failures retain their diagnostic and retry every five seconds, including while
+petting keeps the shared capture alive. Recovering music does not restart that capture.
+Music inference failures also clear and retry that consumer without interrupting petting.
+A petting inference failure disables that classifier until restart, ending any active petting
+event, while music and capture continue.
 
 The capture pipe is nonblocking. Shutdown can interrupt a stalled capture, which is restarted
 with bounded backoff. Timestamps follow the captured sample count rather than inference
@@ -164,14 +177,14 @@ API version 48 adds `robot.dance` and `robot.dance.set {"enabled":true|false}`. 
 robotd calls. The setter returns `IntentResult`, including a refusal if saving fails. The read
 returns `enabled`, `state`, optional `bpm` and optional `reason`. States are `disabled`, `waiting`,
 `acquiring` and `dancing`; waiting reasons include `initializing`, `robot_not_ready`,
-`manual_control`, `audio_unavailable`, `no_music_or_beat` and `dance_area_limit`. A fading dance still reports
+`manual_control`, `audio_unavailable`, `no_music_or_beat`, `unsupported_walk_policy` and `dance_area_limit`. A fading dance still reports
 `dancing` with its loss reason. `robot_not_ready` includes an unavailable pickup detector.
 
 The setter is classified as mutating. BLE routes it after the existing PIN gate; WebRTC permits
 it under that transport's existing watching-peer permission model, like other persistent robot
 settings. Install matching robotd, robotctl and transport binaries together. All three release
 packaging paths include the model, class map, provenance and Apache license. Nothing was
-published or installed onto a robot as part of development.
+published as a daemon release or installed onto a robot as part of development.
 
 `dance.model` defaults to `/opt/robot/daemon/current/models/music_yamnet.onnx`. Changing model
 paths through `robotctl configure` needs a robotd restart; `robotctl dance on|off` applies its

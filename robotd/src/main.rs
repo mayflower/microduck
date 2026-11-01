@@ -3854,13 +3854,21 @@ async fn control_loop<T: RobotIo>(
             && !theremin.as_ref().is_some_and(|t| t.active())
             && !chorale.as_ref().is_some_and(|c| c.active());
         let music = state.music.load_full();
-        let (overlay, status) = dancer.tick(
+        let footwork_supported = !params.dance.footwork
+            || controller
+                .as_ref()
+                .is_some_and(Controller::supports_dance_footwork);
+        let dance_enabled = state.dance_enabled.load(Ordering::Relaxed);
+        let (overlay, mut status) = dancer.tick(
             tick_start,
             music.as_deref(),
-            state.dance_enabled.load(Ordering::Relaxed),
-            eligible,
+            dance_enabled,
+            eligible && footwork_supported,
             intents.manual_age(),
         );
+        if dance_enabled && eligible && !footwork_supported {
+            status.reason = Some("unsupported_walk_policy".into());
+        }
         if let Ok(mut slot) = state.dance_status.try_lock() {
             *slot = status;
         }
@@ -5010,9 +5018,9 @@ fn skills_report(state: &RobotState) -> proto::SkillsResult {
 /// client that forgot would leave a robot whose file and behaviour disagree until the next
 /// restart — the exact state `robotctl policy load` exists to reconcile.
 ///
-/// The reload is what checks the policy: it opens the file and refuses the shape, reporting the
-/// slot as degraded rather than taking the robot down. So this validates what it cheaply can —
-/// a name, a length, a path that exists — and leaves the network to the loader.
+/// Validate the configuration and, when ONNX Runtime is available, the policy file before
+/// saving. The subsequent reload installs the controller while preserving the running one
+/// if a file changed or became unreadable between validation and loading.
 fn set_skill_request(
     p: &proto::SkillParams,
     state: &RobotState,
@@ -6286,7 +6294,12 @@ mod tests {
     fn setting_a_skill_keeps_what_the_call_left_out() {
         let dir = tempfile::tempdir().expect("tempdir");
         let onnx = dir.path().join("bow.onnx");
-        std::fs::write(&onnx, b"not really an onnx").expect("write");
+        // Exercise partial edits with a real model whether ONNX Runtime is installed or not.
+        std::fs::write(
+            &onnx,
+            include_bytes!("../../duck-control/tests/fixtures/feedforward.onnx"),
+        )
+        .expect("write");
         let (_cfg, state) = state_over("");
         let intents = Intents::default();
 
@@ -8006,6 +8019,12 @@ mod tests {
     /// load; without it, the runtime probe fails first. Either way the contract is the same.
     #[tokio::test]
     async fn an_unloadable_policy_holds_the_pose_and_reports_why() {
+        let fallback_walk = Params::default()
+            .policy
+            .resolved()
+            .walk
+            .display()
+            .to_string();
         let mut params = Params::default();
         params.policy.walk = Some(PathBuf::from("/nonexistent/definitely-not-a-policy.onnx"));
         params.policy.stand = None;
@@ -8056,9 +8075,12 @@ mod tests {
         // rolled a release back, so "policy unavailable" on its own is not actionable — that
         // is the same failure as the useless "loop has not completed a cycle" this branch
         // exists to avoid. Which detail arrives depends on the machine: the bogus path where
-        // ONNX Runtime is installed, the runtime's own diagnosis where it is not.
+        // ONNX Runtime is installed, the runtime's own diagnosis where it is not. An invalid
+        // override can also be dropped before loading: then the cause names the fallback file.
         assert!(
-            reason.contains("definitely-not-a-policy.onnx") || reason.contains("ONNX Runtime"),
+            reason.contains("definitely-not-a-policy.onnx")
+                || reason.contains(&fallback_walk)
+                || reason.contains("ONNX Runtime"),
             "health must carry the underlying cause, got {reason:?}"
         );
         assert!(

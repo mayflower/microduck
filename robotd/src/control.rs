@@ -320,6 +320,11 @@ impl Controller {
         self.last_action = [0.0; ACTION_LEN];
     }
 
+    /// Recorded offsets require the calibrated walk network throughout the cycle.
+    pub fn supports_dance_footwork(&self) -> bool {
+        !self.policy.has_standing() && crate::dance_gait::supports_policy(self.policy.walk_digest())
+    }
+
     /// The policy was stopped on purpose: end whatever move is in flight, and keep the seat.
     ///
     /// A move cut short is not resumed on the next Start — its window would pick up mid-way, on

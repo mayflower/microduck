@@ -22,6 +22,7 @@ parser.add_argument(
     "--body-python", type=Path, default=root.parent / "microduck_rl/.venv/bin/python"
 )
 parser.add_argument("--robotd", type=Path, default=root / "target/debug/robotd")
+parser.add_argument("--robotctl", type=Path, default=root / "target/debug/robotctl")
 parser.add_argument("--policies", type=Path, default=root.parent / "models/policies")
 parser.add_argument(
     "--walk-policy",
@@ -84,7 +85,7 @@ if not math.isfinite(args.start_seconds) or args.start_seconds < 0:
     parser.error("--start-seconds must be finite and nonnegative")
 if not math.isfinite(args.acquire_timeout) or args.acquire_timeout <= 0:
     parser.error("--acquire-timeout must be finite and positive")
-if args.observe_seconds < 12:
+if not math.isfinite(args.observe_seconds) or args.observe_seconds < 12:
     parser.error("--observe-seconds must be at least 12 to cover the dance phrases")
 if args.play_audio and shutil.which("aplay") is None:
     parser.error("--play-audio requires aplay on this machine")
@@ -243,7 +244,7 @@ def rpc(method, params=None):
 def ctl(action):
     result = subprocess.run(
         [
-            str(root / "target/debug/robotctl"),
+            str(args.robotctl.absolute()),
             "--robot-socket",
             str(tmp / "robot.sock"),
             "dance",

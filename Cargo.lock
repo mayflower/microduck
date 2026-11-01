@@ -3560,6 +3560,7 @@ dependencies = [
  "ort",
  "rustfft",
  "serde_json",
+ "tempfile",
  "tracing",
 ]
 

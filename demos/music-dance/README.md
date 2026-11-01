@@ -5,6 +5,8 @@ microphone receives. No robot, host microphone, training job or GPU is needed. T
 opt-in and has been validated in simulation; physical robot validation is pending.
 
 The daemon alternates feet once per quarter-note beat and follows a compact curved path.
+Footwork requires the pinned VelStand model below with no separate standing network;
+other setups report `unsupported_walk_policy`.
 [Behavior and implementation](../../docs/design/music-dance.md) and
 [validation results](../../docs/project/music-dance-validation.md) describe its limits.
 

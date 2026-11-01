@@ -5,15 +5,28 @@ const CLOCK_OFFSET: f64 = -0.04;
 
 #[derive(serde::Deserialize)]
 struct Cycle {
+    policy_sha256: String,
     joints: [usize; 4],
     coefficients: [[f64; 4]; 8],
 }
 static CYCLE: LazyLock<Cycle> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../assets/dance-cycle.json")).expect("embedded dance cycle")
 });
+static POLICY_DIGEST: LazyLock<[u8; 32]> = LazyLock::new(|| {
+    assert_eq!(CYCLE.policy_sha256.len(), 64, "embedded policy digest");
+    std::array::from_fn(|i| {
+        u8::from_str_radix(&CYCLE.policy_sha256[i * 2..i * 2 + 2], 16)
+            .expect("embedded policy digest")
+    })
+});
 
 pub fn initialize() {
     LazyLock::force(&CYCLE);
+    LazyLock::force(&POLICY_DIGEST);
+}
+
+pub fn supports_policy(digest: &[u8; 32]) -> bool {
+    digest == &*POLICY_DIGEST
 }
 
 fn wave(phase: f64) -> [f64; 4] {
@@ -208,6 +221,20 @@ impl ContactClock {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn footwork_is_bound_to_the_calibrated_model_bytes() {
+        // Independently pin the VelStand v8 used for the recorded physical trials;
+        // merely editing a profile's metadata must not authorize another model.
+        let digest = [
+            0x2f, 0xc7, 0xf8, 0xee, 0x6a, 0xcd, 0x7d, 0x0d, 0x3f, 0x66, 0xa9, 0x99, 0x27, 0xb5,
+            0xd5, 0xa5, 0x65, 0x89, 0xae, 0xed, 0x02, 0xec, 0x71, 0x4d, 0xe3, 0x29, 0xb2, 0x52,
+            0xd5, 0xcc, 0xf4, 0x92,
+        ];
+        assert!(supports_policy(&digest));
+        let mut changed = digest;
+        changed[0] ^= 1;
+        assert!(!supports_policy(&changed));
+    }
     #[test]
     fn one_swing_window_per_beat_and_each_leg_repeats_every_two_beats() {
         for bpm in [70.0, 90.0, 120.0, 150.0] {
