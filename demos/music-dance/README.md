@@ -8,6 +8,15 @@ The daemon alternates feet once per quarter-note beat and follows a compact curv
 [Behavior and implementation](../../docs/design/music-dance.md) and
 [validation results](../../docs/project/music-dance-validation.md) describe its limits.
 
+## 30-second preview
+
+<video src="https://github.com/mayflower/microduck/releases/download/music-dance-demo-v1/microduck-music-dance-30s.mp4" controls width="960"></video>
+
+[Watch or download the video with sound](https://github.com/mayflower/microduck/releases/download/music-dance-demo-v1/microduck-music-dance-30s.mp4).
+720p, 30 fps: two different 15-second simulation takes joined with a camera cut. Each uses
+its recorded motion and soundtrack at normal speed, with no fitted beat shift. The existing
+estimated 80 ms playback delay is retained. The clip is labeled as MuJoCo simulation.
+
 ## Set up on Linux
 
 Check out the feature branch:
@@ -75,6 +84,42 @@ on the physical robot.
 
 On a real robot, [activation and prerequisites](../../docs/design/music-dance.md) apply.
 The simulation harness connects only to temporary simulation processes.
+
+## Reproduce the video
+
+With the environment above set up, capture two takes and render 15 seconds from each.
+Rendering runs separately from physics and keeps its recorded timing; it does not speed up
+the motion or fit an audio shift to the result. The two source cue points give different
+acquisition histories and camera views of the dance.
+
+```sh
+for cue in 65 80; do
+  .venv/bin/python scripts/test-music-dance-sim.py \
+    --body-python .venv/bin/python --policies /tmp/microduck-dance-policies \
+    --audio demos/music-dance/hear-me-now.mp3 --start-seconds "$cue" \
+    --play-audio --demo --observe-seconds 34 --output "/tmp/microduck-video-$cue"
+done
+MUJOCO_GL=egl .venv/bin/python scripts/render-music-dance-video.py \
+  /tmp/microduck-video-65 --audio demos/music-dance/hear-me-now.mp3 \
+  --source-start-seconds 65 --start-seconds 2 --duration 15 --azimuth 225 \
+  --output /tmp/microduck-take-a.mp4
+MUJOCO_GL=egl .venv/bin/python scripts/render-music-dance-video.py \
+  /tmp/microduck-video-80 --audio demos/music-dance/hear-me-now.mp3 \
+  --source-start-seconds 80 --start-seconds 2 --duration 15 --azimuth 180 \
+  --output /tmp/microduck-take-b.mp4
+ffmpeg -hide_banner -loglevel error -y \
+  -i /tmp/microduck-take-a.mp4 -i /tmp/microduck-take-b.mp4 \
+  -filter_complex '[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]' \
+  -map '[v]' -map '[a]' -t 30 -r 30 -c:v libx264 -crf 20 -pix_fmt yuv420p \
+  -c:a aac -b:a 192k -movflags +faststart /tmp/microduck-music-dance-30s.mp4
+```
+
+The renderer needs offscreen OpenGL/EGL and an FFmpeg build with `libx264`, AAC and `drawtext`.
+It writes a JSON sidecar containing audio/pose/video checksums, the clock offset, frame count
+and camera view. It rejects an interval with stationary head/feet rather than presenting a
+musical break as continuous dancing. The MP4 and provenance are hosted as assets of the
+[media-only demo prerelease](https://github.com/mayflower/microduck/releases/tag/music-dance-demo-v1),
+outside Git history; this is not an installable daemon release.
 
 ## Demo recording
 

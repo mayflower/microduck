@@ -109,3 +109,7 @@ No duck was harmed in the making of this robot. Several were consulted.
 
 Try [music-reactive dancing in MuJoCo](demos/music-dance/README.md), with audible playback and
 the included demo track. This opt-in feature is simulation-validated; hardware validation is pending.
+
+[Watch the 30-second dance video with music](https://github.com/mayflower/microduck/releases/download/music-dance-demo-v1/microduck-music-dance-30s.mp4).
+
+[![Microduck dancing in MuJoCo — click for the 30-second video with sound](https://github.com/mayflower/microduck/releases/download/music-dance-demo-v1/microduck-music-dance-preview.webp)](https://github.com/mayflower/microduck/releases/download/music-dance-demo-v1/microduck-music-dance-30s.mp4)
