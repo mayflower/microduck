@@ -486,6 +486,12 @@ pub const JSONRPC_VERSION: &str = "2.0";
 /// ([`OsStatus`]). New routes: an `updaterd` predating them answers METHOD_NOT_FOUND, and a board
 /// whose image has no A/B slots answers [`code::NOT_SUPPORTED`].
 ///
+/// # v48 — autonomous music dance
+///
+/// `robot.dance` reports activation, state, tempo and waiting reason. `robot.dance.set`
+/// persists the opt-in before acknowledging it. Install the matching robotd, robotctl,
+/// transport daemons and bundled music model together. It never enables motor torque.
+///
 /// # v47 — anonymous usage data
 ///
 /// [`method::TELEMETRY_STATUS`] and [`method::TELEMETRY_SET`]: whether the robot shares anonymous
@@ -516,7 +522,7 @@ pub const JSONRPC_VERSION: &str = "2.0";
 /// [`code::SESSIONS_CONNECTED`] while one is connected, unless `interrupt_sessions` is set. A request made
 /// over WebRTC by the only peer connected is exempt. `robot.remoteSessionActive` is gone; it was
 /// `updaterd`'s question, refused to every client.
-pub const API_VERSION: u32 = 50;
+pub const API_VERSION: u32 = 51;
 
 /// The observation width every policy this robot family runs is built against.
 ///
@@ -1026,6 +1032,8 @@ pub mod method {
     pub const PAD_FORGET: &str = "pad.forget";
     pub const PAD_BINDINGS: &str = "pad.bindings";
     pub const PAD_BIND: &str = "pad.bind";
+    pub const ROBOT_DANCE: &str = "robot.dance";
+    pub const ROBOT_DANCE_SET: &str = "robot.dance.set";
     pub const ROBOT_SKILLS: &str = "robot.skills";
     pub const ROBOT_SET_SKILL: &str = "robot.setSkill";
     pub const ROBOT_REMOVE_SKILL: &str = "robot.removeSkill";
@@ -1316,6 +1324,8 @@ pub enum Call {
     PadForget(PadForgetParams),
     PadBindings,
     PadBind(PadBindParams),
+    RobotDance,
+    RobotDanceSet(DanceSetParams),
     RobotSkills,
     RobotSetSkill(SkillParams),
     RobotRemoveSkill(SkillNameParams),
@@ -1459,6 +1469,8 @@ impl Call {
             Call::PadForget(_) => method::PAD_FORGET,
             Call::PadBindings => method::PAD_BINDINGS,
             Call::PadBind(_) => method::PAD_BIND,
+            Call::RobotDance => method::ROBOT_DANCE,
+            Call::RobotDanceSet(_) => method::ROBOT_DANCE_SET,
             Call::RobotSkills => method::ROBOT_SKILLS,
             Call::RobotSetSkill(_) => method::ROBOT_SET_SKILL,
             Call::RobotRemoveSkill(_) => method::ROBOT_REMOVE_SKILL,
@@ -1475,7 +1487,7 @@ impl Call {
     pub fn is_mutating(&self) -> bool {
         matches!(
             self,
-            Call::Apply(_)
+            Call::RobotDanceSet(_) | Call::Apply(_)
                 | Call::Rollback(_)
                 | Call::ResetToGolden(_)
                 | Call::Select(_)
@@ -1670,6 +1682,7 @@ impl Call {
 
             // The skill table. `robotd` writes it and reloads itself afterwards, so one call is
             // enough — and it is the daemon that has to accept the result either way.
+            Call::RobotDance | Call::RobotDanceSet(_) => (Robot, Slow),
             Call::RobotSkills | Call::RobotSetSkill(_) | Call::RobotRemoveSkill(_) => (Robot, Slow),
             // Re-sweeps the radio rather than returning the last scan.
             Call::NetScan => (Config, Slow),
@@ -1736,6 +1749,7 @@ impl Call {
             Call::RobotHead(p) => encode(p),
             Call::RobotLook(p) => encode(p),
             Call::RobotEnable(p) => encode(p),
+            Call::RobotDanceSet(p) => encode(p),
             Call::RobotDo(p) => encode(p),
             Call::RobotRebootMotors(p) => encode(p),
             Call::RobotPose(p) => encode(p),
@@ -1801,6 +1815,7 @@ impl Call {
             | Call::SystemPairingPin
             | Call::PadStatus
             | Call::PadBindings
+            | Call::RobotDance
             | Call::RobotSkills
             | Call::PadInput
             | Call::TofStream
@@ -1920,6 +1935,8 @@ impl Call {
             method::PAD_FORGET => Call::PadForget(decode(params)?),
             method::PAD_BINDINGS => Call::PadBindings,
             method::PAD_BIND => Call::PadBind(decode(params)?),
+            method::ROBOT_DANCE => Call::RobotDance,
+            method::ROBOT_DANCE_SET => Call::RobotDanceSet(decode(params)?),
             method::ROBOT_SKILLS => Call::RobotSkills,
             method::ROBOT_SET_SKILL => Call::RobotSetSkill(decode(params)?),
             method::ROBOT_REMOVE_SKILL => Call::RobotRemoveSkill(decode(params)?),
@@ -2125,6 +2142,8 @@ pub mod test_support {
             Call::PadForget(PadForgetParams {
                 mac: "78:86:2E:BB:13:28".into(),
             }),
+            Call::RobotDance,
+            Call::RobotDanceSet(DanceSetParams { enabled: true }),
             Call::RobotSkills,
             Call::RobotSetSkill(SkillParams::default()),
             Call::RobotRemoveSkill(SkillNameParams {
@@ -6246,7 +6265,7 @@ mod tests {
     fn every_call_covers_every_variant() {
         assert_eq!(
             every_call().len(),
-            78,
+            80,
             "a Call variant was added or removed — update every_call() and this count"
         );
     }
@@ -6484,6 +6503,7 @@ mod tests {
                 // needs on a robot it is not allowed to reconfigure.
                 method::PAD_PAIR,
                 method::PAD_FORGET,
+                method::ROBOT_DANCE_SET,
             ]
         );
     }
@@ -7361,4 +7381,18 @@ mod tests {
             vec!["  https://huggingface.co/a/b/resolve/main/preview.mp4"]
         );
     }
+}
+
+/// Persistently enable/disable autonomous music dancing.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DanceSetParams {
+    pub enabled: bool,
+}
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct DanceStatus {
+    pub enabled: bool,
+    pub state: String,
+    pub bpm: Option<f64>,
+    pub reason: Option<String>,
 }

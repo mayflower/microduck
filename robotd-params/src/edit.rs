@@ -886,6 +886,12 @@ pub fn set_slots(path: &Path, slots: &[crate::Slot], to: Option<&Path>) -> Resul
 /// an owner's decisions and freeze them in. `every_live_template_value_is_listed` keeps it
 /// complete going forward. `[board] version` is never adopted and needs no entry.
 const EVER_SHIPPED: &[(&str, &str)] = &[
+    ("dance.enabled", "false"),
+    ("dance.footwork", "true"),
+    (
+        "dance.model",
+        "\"/opt/robot/daemon/current/models/music_yamnet.onnx\"",
+    ),
     ("bus.port", "\"/dev/ttyS2\""),
     ("control.hz", "50"),
     ("control.cmd_alpha", "0.2"),
@@ -1983,6 +1989,7 @@ mod tests {
                 "head_imu",
                 "audio",
                 "emotions",
+                "dance",
                 "media",
                 // Last, and the editor shows sections in this order: the pad is what a robot's
                 // buttons do, which is the thing somebody browses for rather than tunes.

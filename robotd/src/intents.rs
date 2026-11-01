@@ -138,6 +138,7 @@ pub enum WheeeHold {
 }
 
 pub struct Intents {
+    manual_us: std::sync::atomic::AtomicU64,
     /// Epoch for every stamp. `Instant` so the clock cannot run backwards under us.
     epoch: Instant,
     twist: ArcSwap<Stamped<[f64; 3]>>,
@@ -272,6 +273,7 @@ impl Intents {
         let epoch = Instant::now();
         Self {
             epoch,
+            manual_us: std::sync::atomic::AtomicU64::new(u64::MAX),
             // Stamped at zero, so before any client connects the twist already reads as
             // maximally stale and the deadman holds the robot still. Starting "fresh" would
             // mean a robot that briefly believes it has a live driver.
@@ -311,6 +313,9 @@ impl Intents {
     }
 
     pub fn set_twist(&self, twist: [f64; 3]) {
+        if twist.iter().any(|v| v.abs() > 1e-4) || self.twist.load().value != twist {
+            self.mark_manual();
+        }
         self.twist.store(Arc::new(Stamped {
             value: twist,
             at_us: self.now_us(),
@@ -318,6 +323,9 @@ impl Intents {
     }
 
     pub fn set_head(&self, head: [f64; 4]) {
+        if self.head.load().value != head {
+            self.mark_manual();
+        }
         self.head.store(Arc::new(Stamped {
             value: head,
             at_us: self.now_us(),
@@ -326,10 +334,14 @@ impl Intents {
 
     /// Zero the velocity now. Distinct from the deadman only in that it is deliberate.
     pub fn stop(&self) {
+        self.mark_manual();
         self.set_twist([0.0; 3]);
     }
 
     pub fn set_pose(&self, pose: PoseIntent) {
+        if pose.active || **self.pose.load() != pose {
+            self.mark_manual();
+        }
         self.pose.store(Arc::new(pose));
     }
 
@@ -606,6 +618,17 @@ impl Intents {
         }
     }
 
+    pub fn mark_manual(&self) {
+        self.manual_us.store(self.now_us(), Ordering::Relaxed);
+    }
+    pub fn manual_age(&self) -> Duration {
+        let at = self.manual_us.load(Ordering::Relaxed);
+        if at == u64::MAX {
+            Duration::MAX
+        } else {
+            Duration::from_micros(self.now_us().saturating_sub(at))
+        }
+    }
     pub fn snapshot(&self) -> Snapshot {
         let now = self.now_us();
         let twist = self.twist.load();
@@ -718,6 +741,20 @@ mod tests {
             fresh < stale,
             "expected {fresh:?} to be younger than {stale:?}"
         );
+    }
+
+    #[test]
+    fn idle_keepalives_do_not_claim_manual_ownership() {
+        let intents = Intents::new();
+        intents.set_twist([0.0; 3]);
+        intents.set_head([0.0; 4]);
+        intents.set_pose(PoseIntent::default());
+        assert_eq!(intents.manual_age(), Duration::MAX);
+        intents.set_head([0.0, 0.2, 0.0, 0.0]);
+        let at = intents.manual_us.load(Ordering::Relaxed);
+        intents.set_head([0.0, 0.2, 0.0, 0.0]);
+        assert_eq!(intents.manual_us.load(Ordering::Relaxed), at);
+        assert!(intents.manual_age() < Duration::from_secs(1));
     }
 
     /// `stop` zeroes velocity without disabling the policy — the robot should stand, not

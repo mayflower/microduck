@@ -197,6 +197,7 @@ pub struct Params {
     pub safety: SafetyParams,
     pub audio: AudioParams,
     pub emotions: EmotionsParams,
+    pub dance: DanceParams,
     pub theremin: ThereminParams,
     pub pickup: PickupParams,
     pub head_imu: HeadImuParams,
@@ -5036,5 +5037,23 @@ mod tests {
             !Params::default().update_gate.auto_rollback,
             "off unless asked for"
         );
+    }
+}
+
+/// Autonomous music dance. Activation is opt-in and persists in the user layer.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DanceParams {
+    pub enabled: bool,
+    pub footwork: bool,
+    pub model: PathBuf,
+}
+impl Default for DanceParams {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            footwork: true,
+            model: PathBuf::from("/opt/robot/daemon/current/models/music_yamnet.onnx"),
+        }
     }
 }

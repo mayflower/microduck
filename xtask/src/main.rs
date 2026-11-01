@@ -1930,6 +1930,28 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_music_model_is_packaged_at_every_site() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap();
+        for asset in [
+            "music_yamnet.onnx",
+            "music_yamnet.json",
+            "yamnet_class_map.csv",
+            "YAMNET-LICENSE",
+        ] {
+            assert!(root.join("pet-detect/models").join(asset).exists());
+            for site in PACKAGING_SITES {
+                let text = std::fs::read_to_string(root.join(site)).unwrap();
+                assert!(
+                    text.contains(&format!("pet-detect/models/{asset}=models/{asset}")),
+                    "{site} omits {asset}"
+                );
+            }
+        }
+    }
+
     /// The pick-up classifier ships inside the release like the petting one, for the same
     /// reasons: small, a detector rather than a policy, versioned with the loop that feeds it —
     /// its input is the loop's own feature layout, so a model from another release is the wrong

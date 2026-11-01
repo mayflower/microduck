@@ -53,6 +53,7 @@ fn permits(call: &proto::Call) -> bool {
     use proto::Call::*;
     match call {
         // The version handshake. Must be reachable or no client can establish anything.
+        RobotDance | RobotDanceSet(_) => true,
         Hello(_) => true,
 
         // ── the robot, which is what this transport is for ───────────────────
@@ -459,6 +460,8 @@ mod tests {
                 // fifteen-second window, which a remote peer cannot satisfy — but unbonding one
                 // is a thing you do *because* the pad is not there.
                 proto::method::PAD_FORGET,
+                // The watching peer may opt into or disable the idle behavior.
+                proto::method::ROBOT_DANCE_SET,
             ],
             "a mutating call was routed to WebRTC; is `deploy/updater.toml` still narrow enough?"
         );
