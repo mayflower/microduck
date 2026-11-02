@@ -4,19 +4,16 @@ Watch the real control daemon dance in MuJoCo while hearing the same audio that 
 microphone receives. No robot, host microphone, training job or GPU is needed. This feature is
 opt-in and has been validated in simulation; physical robot validation is pending.
 
-The daemon alternates feet once per quarter-note beat and follows a compact curved path.
-Footwork requires the pinned VelStand model below with no separate standing network;
-other setups report `unsupported_walk_policy`.
-[Behavior and implementation](../../docs/design/music-dance.md) and
-[validation results](../../docs/project/music-dance-validation.md) describe its limits.
+The [music-dance design](../../docs/design/music-dance.md) owns activation, supported policies,
+motion and timing; [validation results](../../docs/project/music-dance-validation.md) record
+what has been measured.
 
 ## 30-second preview
 
 <video src="https://github.com/user-attachments/assets/79454828-8846-43da-bd04-e11e17808aff" controls width="960"></video>
 
 720p, 30 fps: two different 15-second simulation takes joined with a camera cut. Each uses
-its recorded motion and soundtrack at normal speed, with no fitted beat shift. The existing
-estimated 80 ms playback delay is retained. The clip is labeled as MuJoCo simulation.
+its recorded motion and soundtrack at normal speed; the clip is labeled as MuJoCo simulation.
 
 ## Set up on Linux
 
@@ -66,22 +63,11 @@ cargo +1.94.1 build --locked -p robotd -p robotctl
   --viewer --play-audio --demo --observe-seconds 120
 ```
 
-The viewer stays open during acquisition and the observation period, then closes. The console
-prints the temporary artifact directory and acquisition state. Allow for the initial beat lock
-and standing preparation before the feet start. `Ctrl+C` stops the demo and its child processes.
+The window closes when the run finishes; `Ctrl+C` stops it early. The console prints acquisition
+progress and the temporary directory containing logs and measurements.
 
-`--start-seconds 80` starts in the percussive passage used during development. To hear the whole
-track, omit that flag. To run without a window or sound, omit `--viewer --play-audio`. Add
-`--check-rhythm` with `--play-audio` to score a steady percussive passage, or omit `--demo` to exercise music loss,
-manual interruption, disabling and restart persistence. Output includes daemon logs, body
-samples and physical footwork measurements; it is written outside the checkout by default.
-
-Absolute timing scores currently use an estimated 80 ms ALSA output delay from the development
-host, recorded in each report. This is not an acoustic calibration for your device. Silent runs
-use the source clock with zero output delay and can fail the absolute timing guard even when
-cadence, alternation and path checks pass. Use silent runs for movement/lifecycle checks;
-audio latency and beat-to-motion timing still require validation on each playback device and
-on the physical robot.
+See [replay options and timing limits](../../docs/design/music-dance.md#reproduce-the-checks-without-a-robot)
+before changing playback, running lifecycle checks or interpreting rhythm scores.
 
 On a real robot, [activation and prerequisites](../../docs/design/music-dance.md) apply.
 The simulation harness connects only to temporary simulation processes.

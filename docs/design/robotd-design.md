@@ -456,6 +456,9 @@ targets       ← home pose + action_scale × action
 filters       ← first-order low-pass on head and legs
 ```
 
+The opt-in [music-dance overlay](music-dance.md#ownership-and-motion) joins this path before
+the final safety write; that document owns its eligibility, arbitration and calibrated footwork.
+
 Two subtleties of the prototype are worth naming because they are easy to "fix" by accident.
 **A kick window runs at standing tuning** — the kick's observation carries an all-zero command
 and the standing transition fires on exactly that, so a kick runs at `standing_action_scale`
@@ -966,6 +969,9 @@ Re-reading `[safety]` or `[control]` under a running loop is a different and muc
 and it is still not made. `robotctl configure` knows which of the three answers a key wants, and
 a key that says nothing fails a test in `robotctl`.
 
+The explicit [`robot.dance.set`](music-dance.md#wire-contract-and-installation) RPC persists
+and applies its activation switch live, without watching the configuration file.
+
 Belonging to the board rather than the release is what makes a hand-edited policy path stick: the
 defaults point inside `releases/<ver>/`, so an ordinary update keeps a policy alongside the
 binaries trained against it, and deleting the override goes back to that. The file may be absent
@@ -1017,11 +1023,10 @@ the loop's own rate rather than the prototype's separate 100 Hz. That cost is th
 "no odometry" decision in §7 was reversed rather than re-argued: the objection was never the
 arithmetic, it was that nothing read the answer.
 
-### 4.5 What else the loop drives, and why none of it has a design page
+### 4.5 Other behaviors driven by the loop
 
-`robotd` grew five subsystems after slice 2 that are not control and not safety. They share a
-shape: each hangs off the tick, none may block it, and none can reach the bus except through the
-intents the loop already arbitrates.
+Optional behaviors share the tick without owning the motor bus or waiting on clients;
+their proposals pass through the loop's arbitration and final safety write.
 
 | in the process | what it is | where the reasoning lives |
 |---|---|---|
@@ -1029,17 +1034,17 @@ intents the loop already arbitrates.
 | `theremin.rs` | depth from `tofd` at 15 Hz → a note, a mouth opening, and a line of state, sampled by the 50 Hz loop and never waited on | the module header |
 | `chorale.rs` | several ducks singing one piece: the lowest id conducts, the conductor owns the seating, `btd` carries the beacons and does no thinking | the module header |
 | `emotion.rs` | an emotion = keyframes and a wav, shipped in the release with `[emotions] dir` on top, played by `robot.do <name>` through the same head, pose and mouth commands a client sends | the module header |
-| `pet-detect/` | a ~20 KB CNN over a 40-band log-mel window from the onboard mic, in its own worker | the crate header |
+| `pet-detect/` | the shared microphone worker for petting, ambient events and music | the crate header; [music-dance.md](music-dance.md#audio-path-and-recognition) owns music analysis |
+| `dance.rs`, `dance_gait.rs`, `dance_motion.rs` | opt-in motion in response to music while the robot is idle | [music-dance.md](music-dance.md) |
 | `vetbook.rs` | the robot's lifetime record: a tally the tick adds to without a lock, handed to the shared book once a second with `try_lock`, saved atomically once a minute; plus a 1-byte read of each servo's latched alerts every 10 s | the module header, and `duck_ipc_proto::vetbook` for the record |
 
 Plus `soc.rs`, which reads the board's own thermal zones and clock ceiling out of `sysfs` — not
 behind `RobotIo`, because it has to keep answering when the motor bus does not.
 
-**None of them has a design page, and that is the rule working rather than a gap.** A service earns
-one when a second reader would otherwise have to derive its contract from the code
-(`../README.md`). These have exactly one implementation and one consumer each, and their decisions
-are local enough to live in the module header next to what they constrain. What they need instead
-is to be *operable*, and that is the cheat sheet's job: [the voice], [the chorale], [the theremin].
+Local decisions stay in module headers; mechanisms spanning consumers have the canonical page
+assigned by the [documentation index](../README.md). Music dance spans audio, odometry and
+motion control, so its contract belongs in that page rather than being repeated here.
+Operating the other behaviors is the cheat sheet's job: [the voice], [the chorale], [the theremin].
 
 [the voice]: ../robot/cheatsheet.md#the-voice
 [the chorale]: ../robot/cheatsheet.md#the-duck-chorale
