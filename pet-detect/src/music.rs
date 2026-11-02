@@ -278,8 +278,10 @@ mod tests {
         let mut a = Analyzer::new(&path).unwrap();
         let bytes = include_bytes!("../tests/data/yamnet-tone-mel.f32");
         let features: Vec<_> = bytes
-            .chunks_exact(4)
-            .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| f32::from_le_bytes(*b))
             .collect();
         let output = a
             .session
@@ -291,8 +293,8 @@ mod tests {
         let expected = include_bytes!("../tests/data/yamnet-tone-scores.f32");
         let error = actual
             .iter()
-            .zip(expected.chunks_exact(4))
-            .map(|(a, b)| (*a - f32::from_le_bytes(b.try_into().unwrap())).abs())
+            .zip(expected.as_chunks::<4>().0)
+            .map(|(a, b)| (*a - f32::from_le_bytes(*b)).abs())
             .fold(0.0f32, f32::max);
         assert!(error < 1e-5, "TensorFlow output mismatch: {error}");
     }
@@ -311,8 +313,8 @@ mod tests {
         let expected = include_bytes!("../tests/data/yamnet-tone-mel.f32");
         let error = actual
             .iter()
-            .zip(expected.chunks_exact(4))
-            .map(|(a, b)| (*a - f32::from_le_bytes(b.try_into().unwrap())).abs())
+            .zip(expected.as_chunks::<4>().0)
+            .map(|(a, b)| (*a - f32::from_le_bytes(*b)).abs())
             .fold(0.0f32, f32::max);
         assert!(error < 0.003, "TensorFlow feature mismatch: {error}");
     }
