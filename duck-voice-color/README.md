@@ -1,7 +1,7 @@
 # Voice color utility
 
 A separate native GPL-3.0-or-later audio utility. [The speech design](../docs/design/speech.md)
-owns the approved B preset and its runtime integration. Raw mono f32le PCM enters stdin and
+owns the nasal Heart preset and its runtime integration. Raw mono f32le PCM enters stdin and
 leaves stdout with the same number of samples. Pitch and duration ratios are one.
 
 Build from the source included in a release:

@@ -520,7 +520,7 @@ pub const JSONRPC_VERSION: &str = "2.0";
 /// # v51 — on-device speech
 /// `robot.say` accepts bounded English text, synthesized locally with Paradee Heart.
 /// `speech.behaviors` enables local phrase selection from existing robot behavior events.
-/// Nasal voice B requires the matching bundle's `duck-voice-color` utility; `speech.nasal=false`
+/// Nasal speech requires the matching bundle's `duck-voice-color` utility; `speech.nasal=false`
 /// selects clean Heart. Install full bundles together, including the speech utility.
 /// Install matching daemons, CLI and transports; install the pinned model with `sounds speech install`.
 pub const API_VERSION: u32 = 51;

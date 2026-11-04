@@ -1,4 +1,4 @@
-//! The approved B processor is a standalone native tool, supervised by the synthesis worker.
+//! The nasal Heart processor is a standalone native tool, supervised by the synthesis worker.
 use crate::{Cancellation, MAX_SAMPLES};
 use anyhow::{Context, Result, bail, ensure};
 use std::{
@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const VERSION: &str = "duck-voice-color 1 (Rubber Band 4.0.0; preset B)";
+const VERSION: &str = "duck-voice-color 1 (Rubber Band 4.0.0; nasal Heart)";
 pub(crate) struct Color {
     command: PathBuf,
 }
@@ -35,12 +35,25 @@ impl Color {
         Self::new(path)
     }
     fn new(command: PathBuf) -> Result<Self> {
-        let version = exchange(&command, &["--version"], Vec::new(), 128,
-            Duration::from_secs(2), &Cancellation::default())
-            .with_context(|| format!("checking nasal voice processor {}; install the matching full daemon bundle or select clean speech",command.display()))?;
+        let version = exchange(
+            &command,
+            &["--version"],
+            Vec::new(),
+            128,
+            Duration::from_secs(2),
+            &Cancellation::default(),
+        )
+        .with_context(|| {
+            format!(
+                "checking nasal voice processor {}; install the matching full daemon bundle or select clean speech",
+                command.display()
+            )
+        })?;
+        let actual = std::str::from_utf8(&version)?.trim();
         ensure!(
-            std::str::from_utf8(&version)?.trim() == VERSION,
-            "wrong voice processor version"
+            actual == VERSION,
+            "voice processor {} reports {actual:?}, expected {VERSION:?}; install the matching full daemon bundle",
+            command.display()
         );
         Ok(Self { command })
     }
@@ -80,19 +93,14 @@ impl Color {
     }
 }
 
-struct OwnedChild(Option<Child>);
+struct OwnedChild(Child);
 impl Drop for OwnedChild {
     fn drop(&mut self) {
-        if let Some(mut child) = self.0.take()
-            && !matches!(child.try_wait(), Ok(Some(_)))
-        {
-            let _ = child.kill();
-            // Cancellation returns promptly even if the OS has not reaped it yet.
-            let _ = std::thread::Builder::new()
-                .name("voice-color-reap".into())
-                .spawn(move || {
-                    let _ = child.wait();
-                });
+        if !matches!(self.0.try_wait(), Ok(Some(_))) {
+            let _ = self.0.kill();
+            // This guard lives on the synthesis worker, never the control-loop thread.
+            // Reap here rather than allocating another thread while unwinding a failure.
+            let _ = self.0.wait();
         }
     }
 }
@@ -110,11 +118,11 @@ fn exchange(
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .with_context(|| format!("starting {}", command.display()))?;
-    let mut owned = OwnedChild(Some(child));
-    let child = owned.0.as_mut().expect("owned child");
+    let mut owned = OwnedChild(child);
+    let child = &mut owned.0;
     let mut stdin = child.stdin.take().context("voice processor has no stdin")?;
     let stdout = child
         .stdout
@@ -151,21 +159,31 @@ fn exchange(
     loop {
         cancel.check()?;
         ensure!(Instant::now() < deadline, "voice processor timed out");
-        if !written && let Ok(result) = write_rx.try_recv() {
-            result.context("writing voice PCM")?;
-            written = true;
+        if !written {
+            match write_rx.try_recv() {
+                Ok(result) => {
+                    result.context("writing voice PCM")?;
+                    written = true;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => bail!("voice PCM writer stopped"),
+            }
         }
-        if output.is_none()
-            && let Ok(result) = read_rx.try_recv()
-        {
-            let data = result.context("reading colored PCM")?;
-            ensure!(
-                data.len() <= max_output,
-                "voice processor output exceeds limit"
-            );
-            output = Some(data);
+        if output.is_none() {
+            match read_rx.try_recv() {
+                Ok(result) => {
+                    let data = result.context("reading colored PCM")?;
+                    ensure!(
+                        data.len() <= max_output,
+                        "voice processor output exceeds limit"
+                    );
+                    output = Some(data);
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => bail!("voice PCM reader stopped"),
+            }
         }
-        match owned.0.as_mut().expect("owned child").try_wait()? {
+        match owned.0.try_wait()? {
             Some(status) if !status.success() => bail!("voice processor failed ({status})"),
             Some(_) if written && output.is_some() => return Ok(output.expect("received output")),
             _ => {}
@@ -230,15 +248,36 @@ mod tests {
             .is_err()
         );
         assert!(start.elapsed() < Duration::from_secs(1));
+        let (_dir, path) = script("printf '%s' \"$$\" > \"$0.pid\"; exec sleep 30");
+        let pid_file = path.with_extension("pid");
         let cancel = Cancellation::default();
         let other = cancel.clone();
         let task = std::thread::spawn(move || {
             exchange(&path, &[], Vec::new(), 16, Duration::from_secs(5), &other)
         });
-        std::thread::sleep(Duration::from_millis(30));
+        let ready_by = Instant::now() + Duration::from_secs(2);
+        let pid: i32 = loop {
+            if let Ok(text) = std::fs::read_to_string(&pid_file)
+                && let Ok(pid) = text.parse()
+            {
+                break pid;
+            }
+            assert!(Instant::now() < ready_by, "processor never started");
+            std::thread::sleep(Duration::from_millis(2));
+        };
+        let canceled_at = Instant::now();
         cancel.cancel();
         assert!(task.join().unwrap().is_err());
-        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(canceled_at.elapsed() < Duration::from_secs(1));
+        assert_eq!(
+            unsafe { libc::kill(pid, 0) },
+            -1,
+            "canceled processor was not reaped"
+        );
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ESRCH)
+        );
     }
 
     #[test]

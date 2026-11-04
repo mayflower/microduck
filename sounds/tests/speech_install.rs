@@ -76,3 +76,31 @@ fn concurrent_installation_is_refused_before_download() {
     );
     assert!(!model.exists());
 }
+
+#[test]
+fn a_restrictive_installer_umask_cannot_hide_new_model_directories_from_robotd() {
+    let dir = tempfile::tempdir().unwrap();
+    let original_mode = fs::metadata(dir.path()).unwrap().permissions().mode();
+    let model = dir.path().join("models/nested/speech.onnx");
+    let result = Command::new("/bin/sh")
+        .args(["-c", "umask 077; exec \"$@\"", "installer"])
+        .arg(env!("CARGO_BIN_EXE_sounds"))
+        .args(["speech", "install", "--model"])
+        .arg(&model)
+        .env("PATH", dir.path())
+        .output()
+        .unwrap();
+    // No downloader is provided: directory setup must be safe even before the download starts.
+    assert!(!result.status.success());
+    for path in [dir.path().join("models"), dir.path().join("models/nested")] {
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+    }
+    assert_eq!(
+        fs::metadata(dir.path()).unwrap().permissions().mode(),
+        original_mode
+    );
+    assert!(!model.exists());
+}

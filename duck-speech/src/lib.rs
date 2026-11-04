@@ -123,7 +123,7 @@ impl Engine {
         Self::with_nasal(model, true)
     }
 
-    /// Disable nasal color for an unprocessed Heart reference. The robot defaults to preset B.
+    /// Disable nasal color for an unprocessed Heart reference. The robot defaults to nasal Heart.
     pub fn with_nasal(model: &Path, nasal: bool) -> Result<Self> {
         verify_model(model)?;
         let color = nasal.then(color::Color::discover).transpose()?;

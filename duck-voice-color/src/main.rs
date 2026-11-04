@@ -2,7 +2,7 @@
 //! Standalone audio utility: raw mono f32le stdin → resonance-colored f32le stdout.
 use std::io::{Read, Write};
 
-const VERSION: &str = "duck-voice-color 1 (Rubber Band 4.0.0; preset B)";
+const VERSION: &str = "duck-voice-color 1 (Rubber Band 4.0.0; nasal Heart)";
 const MAX_SECONDS: usize = 30;
 unsafe extern "C" {
     fn duck_voice_color(

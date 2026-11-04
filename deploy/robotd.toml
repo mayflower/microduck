@@ -562,7 +562,7 @@ mode = "walk"
 # yawn_pitch = -0.15
 
 # Local text-to-speech. First run `sounds speech install`, then enable and restart robotd.
-# Speech uses Paradee v1.2's approved Heart voice. See docs/design/speech.md.
+# Speech uses Paradee v1.2's Heart voice. See docs/design/speech.md.
 [speech]
 # enabled = false
 # behaviors = true

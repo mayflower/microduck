@@ -147,10 +147,10 @@ enum SpeechCmd {
     },
     /// Show the model and native frontend redistribution notices.
     Licenses,
-    /// Synthesize text locally with the approved Heart voice; play it or write a WAV.
+    /// Synthesize text locally with the Heart voice; play it or write a WAV.
     Say {
         text: String,
-        /// Use unprocessed Heart instead of the default nasal preset B.
+        /// Use unprocessed Heart instead of the default nasal Heart preset.
         #[arg(long)]
         clean: bool,
         #[arg(long, default_value = duck_speech::DEFAULT_MODEL_PATH)]
@@ -173,7 +173,7 @@ fn install_speech(model: &Path) -> Result<()> {
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
-    std::fs::create_dir_all(parent)?;
+    prepare_model_directory(parent)?;
     let mut lock_name = model.as_os_str().to_os_string();
     lock_name.push(".lock");
     let lock = std::fs::OpenOptions::new()
@@ -224,6 +224,41 @@ fn install_speech(model: &Path) -> Result<()> {
     staging.persist(model)?;
     std::fs::File::open(parent)?.sync_all()?;
     println!("Installed Paradee v1.2 Heart at {}", model.display());
+    Ok(())
+}
+
+/// The model is public data installed by root and read by robotd's service user.
+/// Set permissions on directories we create, without changing existing private parents.
+fn prepare_model_directory(parent: &Path) -> Result<()> {
+    let mut missing = Vec::new();
+    let mut directory = parent;
+    while !directory.is_dir() {
+        missing.push(directory);
+        let ancestor = directory
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        anyhow::ensure!(
+            ancestor != directory,
+            "cannot resolve model directory {}",
+            parent.display()
+        );
+        directory = ancestor;
+    }
+    for directory in missing.into_iter().rev() {
+        match std::fs::create_dir(directory) {
+            Ok(()) => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o755))?;
+                }
+            }
+            Err(error)
+                if error.kind() == std::io::ErrorKind::AlreadyExists && directory.is_dir() => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
     Ok(())
 }
 

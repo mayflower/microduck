@@ -8,7 +8,7 @@ sudo robotctl configure
 ```
 
 Enable `speech.enabled`, leave `audio.enabled` on and accept the offered `robotd` restart.
-The default `speech.nasal=true` applies the approved voice B. Set it to false for clean Heart.
+The default `speech.nasal=true` applies nasal Heart. Set it to false for clean Heart.
 With the default `speech.behaviors=true`, the duck also selects from 20 lines for each of
 eight behavior triggers. [The trigger table](../../docs/design/speech.md#behavior-triggers)
 explains their sensor requirements, timing and cooldowns;
@@ -82,8 +82,8 @@ cargo +1.94.1 test -p robotd --test speech -- --ignored
 cargo +1.94.1 test -p robotd every_behavior_line_synthesizes -- --ignored
 ```
 
-To compare the processor against the approved listening pair, set `MICRODUCK_B_SOURCE` to
-the clean 24 kHz mono PCM16 WAV and `MICRODUCK_B_REFERENCE` to its approved B WAV, then run:
+To compare the processor against a saved listening pair, set `MICRODUCK_B_SOURCE` to
+the clean 24 kHz mono PCM16 WAV and `MICRODUCK_B_REFERENCE` to its nasal reference WAV, then run:
 
 ```sh
 cargo +1.94.1 test -p duck-voice-color --test approved_b -- --ignored

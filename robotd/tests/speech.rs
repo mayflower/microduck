@@ -98,60 +98,102 @@ fn wait_spoken(reader: &mut BufReader<UnixStream>, log_path: &Path, count: usize
     }
 }
 
+struct Fixture {
+    // Stop the daemon before removing its files.
+    daemon: Daemon,
+    _dir: tempfile::TempDir,
+    socket: std::path::PathBuf,
+    log: std::path::PathBuf,
+}
+impl Fixture {
+    fn start(behaviors: bool) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let model = std::env::var_os("MICRODUCK_SPEECH_MODEL").expect("set MICRODUCK_SPEECH_MODEL");
+        let bin = dir.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let player = bin.join("aplay");
+        // Consume actual PCM; the production writer supplies its real-time pacing.
+        std::fs::write(&player, "#!/bin/sh\nexec /bin/cat >/dev/null\n").unwrap();
+        std::fs::set_permissions(&player, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let params = dir.path().join("robotd.toml");
+        let config = format!(
+            r#"[audio]
+enabled = true
+greet = {behaviors}
+pet_detect = false
+bank = {bank:?}
+[speech]
+enabled = true
+behaviors = {behaviors}
+model = {model:?}
+[pickup]
+enabled = false
+"#,
+            bank = dir.path().join("missing-bank"),
+            model = Path::new(&model)
+        );
+        std::fs::write(&params, config).unwrap();
+        let socket = dir.path().join("robotd.sock");
+        let log = dir.path().join("robotd.log");
+        let daemon = Daemon(
+            Command::new(env!("CARGO_BIN_EXE_robotd"))
+                .args(["--fake", "--no-policy", "--socket"])
+                .arg(&socket)
+                .arg("--params")
+                .arg(params)
+                .arg("--vetbook")
+                .arg(dir.path().join("vetbook.json"))
+                .env("PATH", bin)
+                .env("RUST_LOG", "info")
+                .stdout(Stdio::null())
+                .stderr(File::create(&log).unwrap())
+                .spawn()
+                .unwrap(),
+        );
+        let mut fixture = Self {
+            daemon,
+            _dir: dir,
+            socket,
+            log,
+        };
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !fixture.socket.exists() {
+            assert!(fixture.daemon.0.try_wait().unwrap().is_none());
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        fixture
+    }
+    fn subscribe(&self) -> BufReader<UnixStream> {
+        let mut reader = connect(&self.socket);
+        send(
+            &mut reader,
+            Call::RobotSubscribe(SubscribeParams { hz: Some(50) }),
+        );
+        assert_eq!(response(&mut reader)["result"]["accepted"], true);
+        reader
+    }
+}
+
 #[test]
 #[ignore = "requires the pinned speech model and ONNX Runtime; no hardware"]
 fn real_native_speech_respects_disabled_servos_and_a_persistent_manual_grip() {
-    let dir = tempfile::tempdir().unwrap();
-    let model = std::env::var_os("MICRODUCK_SPEECH_MODEL").expect("set MICRODUCK_SPEECH_MODEL");
-    let bin = dir.path().join("bin");
-    std::fs::create_dir(&bin).unwrap();
-    let player = bin.join("aplay");
-    // Consume the real native PCM. The production writer paces it against a monotonic clock.
-    std::fs::write(&player, "#!/bin/sh\nexec /bin/cat >/dev/null\n").unwrap();
-    std::fs::set_permissions(&player, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let params = dir.path().join("robotd.toml");
-    std::fs::write(&params,format!("[audio]\nenabled=true\ngreet=false\npet_detect=false\nbank={:?}\n[speech]\nenabled=true\nbehaviors=false\nmodel={:?}\n[pickup]\nenabled=false\n",dir.path().join("missing-bank"),Path::new(&model))).unwrap();
-    let socket = dir.path().join("robotd.sock");
-    let log_path = dir.path().join("robotd.log");
-    let mut daemon = Daemon(
-        Command::new(env!("CARGO_BIN_EXE_robotd"))
-            .args(["--fake", "--no-policy", "--socket"])
-            .arg(&socket)
-            .arg("--params")
-            .arg(&params)
-            .arg("--vetbook")
-            .arg(dir.path().join("vetbook.json"))
-            .env("PATH", &bin)
-            .env("RUST_LOG", "info")
-            .stdout(Stdio::null())
-            .stderr(File::create(&log_path).unwrap())
-            .spawn()
-            .unwrap(),
-    );
-    let deadline = Instant::now() + Duration::from_secs(15);
-    while !socket.exists() {
-        assert!(daemon.0.try_wait().unwrap().is_none());
-        assert!(Instant::now() < deadline);
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    let mut reader = connect(&socket);
-    send(
-        &mut reader,
-        Call::RobotSubscribe(SubscribeParams { hz: Some(50) }),
-    );
-    assert_eq!(response(&mut reader)["result"]["accepted"], true);
+    let fixture = Fixture::start(false);
+    let socket = &fixture.socket;
+    let log_path = &fixture.log;
+    let mut reader = fixture.subscribe();
     state(&mut reader);
-    say(&socket);
-    wait_spoken(&mut reader, &log_path, 1);
+    say(socket);
+    wait_spoken(&mut reader, log_path, 1);
     assert_eq!(
-        flaps(&socket),
+        flaps(socket),
         0.0,
         "disabled speech animated or tallied the beak"
     );
-    assert!(rpc(&socket, Call::RobotInit).accepted);
+    assert!(rpc(socket, Call::RobotInit).accepted);
     assert!(
         rpc(
-            &socket,
+            socket,
             Call::RobotEnable(EnableParams {
                 on: true,
                 toggle: false
@@ -173,25 +215,25 @@ fn real_native_speech_respects_disabled_servos_and_a_persistent_manual_grip() {
             frame.policy
         );
     }
-    say(&socket);
+    say(socket);
     let mut mouth = Vec::new();
     for _ in 0..100 {
-        assert!(rpc(&socket, Call::RobotMouth(MouthParams { open: 0.0 })).accepted);
+        assert!(rpc(socket, Call::RobotMouth(MouthParams { open: 0.0 })).accepted);
         mouth.push(state(&mut reader).targets[duck_control::model::MOUTH_INDEX]);
     }
     let range = mouth.iter().copied().fold(f64::NEG_INFINITY, f64::max)
         - mouth.iter().copied().fold(f64::INFINITY, f64::min);
     assert!(range > 0.1, "neutral keepalives stole speech: {mouth:?}");
-    wait_spoken(&mut reader, &log_path, 2);
+    wait_spoken(&mut reader, log_path, 2);
     assert!(
-        flaps(&socket) > 0.0,
+        flaps(socket) > 0.0,
         "speech did not reach the effective beak tally"
     );
-    say(&socket);
+    say(socket);
     for _ in 0..35 {
         state(&mut reader);
     }
-    assert!(rpc(&socket, Call::RobotMouth(MouthParams { open: 0.8 })).accepted);
+    assert!(rpc(socket, Call::RobotMouth(MouthParams { open: 0.8 })).accepted);
     let expected = duck_control::model::mouth_target(0.8);
     let mut observed = false;
     for _ in 0..190 {
@@ -208,7 +250,7 @@ fn real_native_speech_respects_disabled_servos_and_a_persistent_manual_grip() {
     }
     assert!(observed, "manual grip never won");
     assert_eq!(
-        std::fs::read_to_string(&log_path)
+        std::fs::read_to_string(log_path)
             .unwrap()
             .matches("SpeechSpoken")
             .count(),
@@ -219,48 +261,11 @@ fn real_native_speech_respects_disabled_servos_and_a_persistent_manual_grip() {
 #[test]
 #[ignore = "requires the pinned speech model and ONNX Runtime; no hardware"]
 fn startup_behavior_speaks_once_without_any_say_request() {
-    let dir = tempfile::tempdir().unwrap();
-    let model = std::env::var_os("MICRODUCK_SPEECH_MODEL").expect("set MICRODUCK_SPEECH_MODEL");
-    let bin = dir.path().join("bin");
-    std::fs::create_dir(&bin).unwrap();
-    let player = bin.join("aplay");
-    std::fs::write(&player, "#!/bin/sh\nexec /bin/cat >/dev/null\n").unwrap();
-    std::fs::set_permissions(&player, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let params = dir.path().join("robotd.toml");
-    std::fs::write(&params, format!(
-        "[audio]\nenabled=true\ngreet=true\npet_detect=false\nbank={:?}\n[speech]\nenabled=true\nbehaviors=true\nmodel={:?}\n[pickup]\nenabled=false\n",
-        dir.path().join("missing-bank"), Path::new(&model)
-    )).unwrap();
-    let socket = dir.path().join("robotd.sock");
-    let log_path = dir.path().join("robotd.log");
-    let mut daemon = Daemon(
-        Command::new(env!("CARGO_BIN_EXE_robotd"))
-            .args(["--fake", "--no-policy", "--socket"])
-            .arg(&socket)
-            .arg("--params")
-            .arg(params)
-            .arg("--vetbook")
-            .arg(dir.path().join("vetbook.json"))
-            .env("PATH", &bin)
-            .env("RUST_LOG", "info")
-            .stdout(Stdio::null())
-            .stderr(File::create(&log_path).unwrap())
-            .spawn()
-            .unwrap(),
-    );
-    let deadline = Instant::now() + Duration::from_secs(15);
-    while !socket.exists() {
-        assert!(daemon.0.try_wait().unwrap().is_none());
-        assert!(Instant::now() < deadline);
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    let mut reader = connect(&socket);
-    send(
-        &mut reader,
-        Call::RobotSubscribe(SubscribeParams { hz: Some(50) }),
-    );
-    assert_eq!(response(&mut reader)["result"]["accepted"], true);
-    wait_spoken(&mut reader, &log_path, 1);
+    let fixture = Fixture::start(true);
+    let socket = &fixture.socket;
+    let log_path = &fixture.log;
+    let mut reader = fixture.subscribe();
+    wait_spoken(&mut reader, log_path, 1);
     // Observe past both the startup grace period and the global cooldown: hello is one-shot.
     let until = Instant::now() + Duration::from_secs(16);
     while Instant::now() < until {
@@ -271,7 +276,7 @@ fn startup_behavior_speaks_once_without_any_say_request() {
     assert!(log.contains("greeting"), "{log}");
     assert_eq!(log.matches("SpeechSpoken").count(), 1, "{log}");
     assert_eq!(
-        flaps(&socket),
+        flaps(socket),
         0.0,
         "startup greeting animated disabled servos"
     );

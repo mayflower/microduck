@@ -632,7 +632,7 @@ pub const REGISTRY: &[Entry] = &[
     feature(
         "speech.nasal",
         Kind::Bool,
-        "Use approved nasal Heart voice B; off selects clean Heart",
+        "Nasal Heart voice; off selects clean Heart",
     ),
     entry(
         "speech.model",

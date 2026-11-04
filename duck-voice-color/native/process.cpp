@@ -9,7 +9,7 @@ extern "C" int duck_voice_color(const float *input, size_t count, float *output,
     try {
         using R = RubberBand::RubberBandStretcher;
         // FormantPreserved is required here: without it, R3 bypasses the intended effect
-        // at unity pitch/time. These are the settings used for the approved B audition.
+        // at unity pitch/time. The explicit formant ratio changes resonance without changing pitch.
         R processor(rate, 1, R::OptionEngineFiner | R::OptionThreadingNever |
                               R::OptionFormantPreserved, 1.0, 1.0);
         processor.setDebugLevel(-1);

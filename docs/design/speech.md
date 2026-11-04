@@ -2,7 +2,7 @@
 
 This page owns English text-to-speech, its model, playback ownership and beak timing.
 The robot synthesizes each request locally with Paradee v1.2's `af_heart` voice, using the
-approved nasal preset B by default. Pitch and timing stay unchanged while vocal resonance
+nasal Heart preset by default. Pitch and timing stay unchanged while vocal resonance
 shifts upward. The [demo](../../demos/speech/README.md) owns runnable examples.
 
 ## Text becomes audio on the robot
@@ -42,8 +42,10 @@ The matching configuration and vocabulary are embedded in `duck-speech/assets/`.
 `sounds speech install` downloads that pinned file to
 `/var/lib/robot/speech/paradee-v1.2-int8.onnx`. It takes an installation lock, downloads to a
 unique adjacent temporary file with a 30-second limit, checks size and SHA-256, syncs and
-publishes by rename. A valid installed model is a true no-op. Failed downloads cannot replace
-it. The model is checked again before loading; weights are not committed to this repository.
+publishes by rename. New model directories are readable and traversable by the robot service
+regardless of the installer's umask; existing parent directory permissions are preserved.
+A valid installed model is a no-op. Failed downloads cannot replace it. The model is checked
+again before loading; weights are not committed to this repository.
 
 The existing shipped `sounds` binary contains the installer. The release's postinstall hook
 runs `sounds speech install --if-enabled /etc/robot/robotd.toml`, using layered configuration.
@@ -61,24 +63,25 @@ Apache-2.0 language data and neural weights. `sounds speech licenses` prints the
 `Cargo.lock` fixes the frontend implementation. Its Rust requirement raises this workspace's
 compiler floor to 1.92, within the Yocto ceiling of 1.94.1.
 
-## Approved voice color B
+## Nasal Heart processing
 
 `duck-voice-color` applies Rubber Band 4.0.0 R3 with formant preservation enabled and an
 explicit formant ratio of 1.5. The preservation option is necessary at unity pitch/time;
-omitting it bypasses the intended resonance change. This is the approved B treatment,
-without the tremolo, EQ or added roughness used for the rejected C audition.
+omitting it bypasses the intended resonance change. The processor changes vocal resonance
+without adding tremolo, EQ or roughness.
 
 The utility measures integrated loudness with EBU R128 and requests -21 LUFS, limiting static
 gain to ±12 dB and reducing it further if necessary to keep sample peaks at or below 0.8.
 Silent or very short buffers receive no loudness boost. There is no added noise or modulation.
-The audition's FFmpeg peak limiter is replaced by whole-buffer peak headroom, so level can differ
-slightly on unusually peaky speech. The R3 color and every utterance's sample count are preserved.
+Whole-buffer peak headroom can reduce the requested level on unusually peaky speech.
+The R3 color and every utterance's sample count are preserved.
 
 The synthesis worker supervises the utility for each utterance. Input and output are bounded
-raw mono f32le pipes; no WAV or temporary audio file is written. The child is canceled if the
-request is canceled, fails, exceeds its output bound or runs beyond 20 seconds. The existing
-20-second overall synthesis deadline still applies. Writer threads mask SIGPIPE so a canceled
-child cannot terminate `robotd`. Nonfinite, oversized or length-changing output is refused.
+raw mono f32le pipes; no WAV or temporary audio file is written. The child is canceled and
+reaped by the synthesis worker if the request is canceled, fails, exceeds its output bound
+or runs beyond 20 seconds. The existing 20-second overall synthesis deadline still applies.
+Writer threads mask SIGPIPE so a canceled child cannot terminate `robotd`. Nonfinite,
+oversized or length-changing output is refused.
 Beak envelopes are computed after coloring and follow the actual final samples.
 
 The utility ships beside `robotd` and `sounds`; no system Rubber Band, Python, FFmpeg, FFTW or
