@@ -284,6 +284,28 @@ mod tests {
         w.detector.fail = true;
         assert_eq!(step(&mut w, true, DEFAULT_POSITION), Some(Edge::Resume));
         assert!(!w.paused());
+        assert!(
+            w.p_held().is_none(),
+            "a reset must not become a put-down speech event"
+        );
+    }
+
+    #[test]
+    fn a_scored_put_down_retains_its_probability_for_behavior_consumers() {
+        let mut w = watch(0.99);
+        for _ in 0..20 {
+            step(&mut w, true, DEFAULT_POSITION);
+        }
+        assert!(w.paused());
+        w.detector.p = 0.0;
+        let mut released = false;
+        for _ in 0..200 {
+            if step(&mut w, true, DEFAULT_POSITION) == Some(Edge::Resume) {
+                assert_eq!(w.p_held(), Some(0.0));
+                released = true;
+            }
+        }
+        assert!(released);
     }
 
     /// A dropped read is not a row: the latch must not advance on a repeated sample.

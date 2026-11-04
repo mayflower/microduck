@@ -8,6 +8,11 @@ sudo robotctl configure
 ```
 
 Enable `speech.enabled`, leave `audio.enabled` on and accept the offered `robotd` restart.
+With the default `speech.behaviors=true`, the duck also selects from 20 lines for each of
+eight behavior triggers. [The trigger table](../../docs/design/speech.md#behavior-triggers)
+explains their sensor requirements, timing and cooldowns;
+[the text catalog](../../robotd/assets/speech-phrases.json) contains all 160 responses.
+Set `speech.behaviors=false` for explicit speech only.
 Then speak:
 
 ```sh
@@ -45,6 +50,8 @@ greet = false
 pet_detect = false
 [speech]
 enabled = true
+# Set audio.greet=true above to hear the automatic startup greeting too.
+behaviors = true
 model = "/tmp/paradee-v1.2-int8.onnx"
 [pickup]
 enabled = false
@@ -69,6 +76,7 @@ The model is deliberately absent from Git and from ordinary offline CI tests. Af
 export MICRODUCK_SPEECH_MODEL=/tmp/paradee-v1.2-int8.onnx
 cargo +1.94.1 test -p duck-speech -- --ignored
 cargo +1.94.1 test -p robotd --test speech -- --ignored
+cargo +1.94.1 test -p robotd every_behavior_line_synthesizes -- --ignored
 ```
 
 For a reusable listening package, provide a JSON array of `{ "id": "sample_00", "text": "Hello." }`

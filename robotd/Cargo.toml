@@ -18,6 +18,7 @@ pet-detect = { path = "../pet-detect" }
 # is not, so `robotd` renders that one itself. Pure Rust, no vendored anything.
 sounds = { path = "../sounds" }
 duck-speech = { path = "../duck-speech" }
+rand = "0.9"
 clap = { workspace = true, features = ["derive"] }
 serde.workspace = true
 serde_json.workspace = true

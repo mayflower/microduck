@@ -4116,6 +4116,7 @@ dependencies = [
  "minisign",
  "odometry",
  "pet-detect",
+ "rand 0.9.5",
  "robotd-params",
  "semver",
  "serde",

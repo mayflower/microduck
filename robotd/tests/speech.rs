@@ -110,7 +110,7 @@ fn real_native_speech_respects_disabled_servos_and_a_persistent_manual_grip() {
     std::fs::write(&player, "#!/bin/sh\nexec /bin/cat >/dev/null\n").unwrap();
     std::fs::set_permissions(&player, std::fs::Permissions::from_mode(0o700)).unwrap();
     let params = dir.path().join("robotd.toml");
-    std::fs::write(&params,format!("[audio]\nenabled=true\ngreet=false\npet_detect=false\nbank={:?}\n[speech]\nenabled=true\nmodel={:?}\n[pickup]\nenabled=false\n",dir.path().join("missing-bank"),Path::new(&model))).unwrap();
+    std::fs::write(&params,format!("[audio]\nenabled=true\ngreet=false\npet_detect=false\nbank={:?}\n[speech]\nenabled=true\nbehaviors=false\nmodel={:?}\n[pickup]\nenabled=false\n",dir.path().join("missing-bank"),Path::new(&model))).unwrap();
     let socket = dir.path().join("robotd.sock");
     let log_path = dir.path().join("robotd.log");
     let mut daemon = Daemon(
@@ -213,5 +213,66 @@ fn real_native_speech_respects_disabled_servos_and_a_persistent_manual_grip() {
             .matches("SpeechSpoken")
             .count(),
         3
+    );
+}
+
+#[test]
+#[ignore = "requires the pinned speech model and ONNX Runtime; no hardware"]
+fn startup_behavior_speaks_once_without_any_say_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let model = std::env::var_os("MICRODUCK_SPEECH_MODEL").expect("set MICRODUCK_SPEECH_MODEL");
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let player = bin.join("aplay");
+    std::fs::write(&player, "#!/bin/sh\nexec /bin/cat >/dev/null\n").unwrap();
+    std::fs::set_permissions(&player, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let params = dir.path().join("robotd.toml");
+    std::fs::write(&params, format!(
+        "[audio]\nenabled=true\ngreet=true\npet_detect=false\nbank={:?}\n[speech]\nenabled=true\nbehaviors=true\nmodel={:?}\n[pickup]\nenabled=false\n",
+        dir.path().join("missing-bank"), Path::new(&model)
+    )).unwrap();
+    let socket = dir.path().join("robotd.sock");
+    let log_path = dir.path().join("robotd.log");
+    let mut daemon = Daemon(
+        Command::new(env!("CARGO_BIN_EXE_robotd"))
+            .args(["--fake", "--no-policy", "--socket"])
+            .arg(&socket)
+            .arg("--params")
+            .arg(params)
+            .arg("--vetbook")
+            .arg(dir.path().join("vetbook.json"))
+            .env("PATH", &bin)
+            .env("RUST_LOG", "info")
+            .stdout(Stdio::null())
+            .stderr(File::create(&log_path).unwrap())
+            .spawn()
+            .unwrap(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !socket.exists() {
+        assert!(daemon.0.try_wait().unwrap().is_none());
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let mut reader = connect(&socket);
+    send(
+        &mut reader,
+        Call::RobotSubscribe(SubscribeParams { hz: Some(50) }),
+    );
+    assert_eq!(response(&mut reader)["result"]["accepted"], true);
+    wait_spoken(&mut reader, &log_path, 1);
+    // Observe past both the startup grace period and the global cooldown: hello is one-shot.
+    let until = Instant::now() + Duration::from_secs(16);
+    while Instant::now() < until {
+        state(&mut reader);
+    }
+    let log = std::fs::read_to_string(log_path).unwrap();
+    assert_eq!(log.matches("behavior speech accepted").count(), 1, "{log}");
+    assert!(log.contains("greeting"), "{log}");
+    assert_eq!(log.matches("SpeechSpoken").count(), 1, "{log}");
+    assert_eq!(
+        flaps(&socket),
+        0.0,
+        "startup greeting animated disabled servos"
     );
 }

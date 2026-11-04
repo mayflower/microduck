@@ -48,7 +48,7 @@ With speech or master audio disabled it performs no download. An installation fa
 optional speech never makes a moving robot unhealthy. The updater's hook timeout is unchanged.
 The same installer works before first activation and with `--model PATH` for development.
 
-`[speech]` defaults to `enabled=false`, the model path above and `mouth_offset_ms=0`.
+`[speech]` defaults to `enabled=false`, `behaviors=true`, the model path above and `mouth_offset_ms=0`.
 Configuration changes require a `robotd` restart. `audio.enabled` is the master prerequisite.
 The model and the legacy quack bank are independent: speech can work without rendered quacks.
 
@@ -56,6 +56,44 @@ The model/configuration use Apache-2.0. The native frontend uses MIT code with a
 Apache-2.0 language data and neural weights. `sounds speech licenses` prints the bundled notices.
 `Cargo.lock` fixes the frontend implementation. Its Rust requirement raises this workspace's
 compiler floor to 1.92, within the Yocto ceiling of 1.94.1.
+
+## Behavior triggers
+
+With `speech.enabled` and `speech.behaviors` enabled, `robotd` selects from
+[160 original English lines](../../robotd/assets/speech-phrases.json): exactly 20 for each
+of eight triggers. This is a text catalog; the selected line is synthesized on the robot
+by the same Heart engine as `robot.say`. No recordings or generated WAV bank are installed.
+The random draw excludes the last admitted line for that trigger.
+
+| Trigger | Source and timing | Per-trigger cooldown |
+|---|---|---|
+| Greeting | Startup, once the speech worker is ready within 15 seconds; honors `audio.greet` | Once per daemon start |
+| Petting | Existing pet classifier's Start event, with its calm gate and speech echo suppression | 30 seconds |
+| Picked up | Existing pickup classifier enters its policy pause | 20 seconds |
+| Put down | Existing pickup classifier scores a release; a reset/error release does not count | 20 seconds |
+| Low battery | Existing smoothed battery estimate is at or below 20%; unknown readings do not count | Once until battery reaches 30%, and at least 60 seconds |
+| Idle | 90 seconds continuously still under the existing idle behavior, with fresh sensor readings | Once per idle spell, and at least 180 seconds |
+| Wake | Activity resumes after an idle spell of at least 90 seconds | 45 seconds |
+| Recovered | A fall or limp-fall ends, followed by two seconds of fresh upright observations after motion ownership settles | 60 seconds |
+
+There is also an eight-second minimum gap between automatic speech admissions. A cooldown starts
+only when `Sound::say` accepts the request. Startup greeting has a bounded grace period, and low
+battery remains eligible while the condition holds. Other edges are discarded when busy or
+unsafe; there is no backlog of old reactions. During a long uninterrupted idle spell the duck
+speaks at most once. A missing sensor read resets idle timing and cannot become a wake event.
+
+Low battery wins simultaneous candidates, followed by recovery, pickup, put-down, petting,
+wake, greeting and idle. Explicit `robot.say` requests win over automatic candidates in the same
+tick and retain their supplied text. A playing utterance still owns the PCM under the normal
+speech arbitration rules. Automatic speech waits for idle audio, fresh readings and safe state;
+it is suppressed during scripted skills, homing, instruments and policy/mode transitions.
+It never delays an empty-battery shutdown or changes movement decisions.
+
+These events reuse the installed detectors. There is no person-arrival detector: greeting means
+daemon startup. Petting and pickup require their respective enabled, working models; idle/wake
+require `idle.enabled`. Disabling `speech.behaviors` leaves explicit `robot.say` available and
+restores ordinary bank greetings/coos. If speech is not ready, petting retains its coo fallback.
+The model-loading grace period may expire silently; an unavailable optional feature is logged.
 
 ## Control-loop and player ownership
 
@@ -117,6 +155,8 @@ The normal workspace tests require no model download or speech hardware. Opt-in 
 exercise the real native text frontend, pinned model and ONNX cancellation. The opt-in daemon
 test drives actual `robotd --fake --no-policy`, native synthesis and a duration-paced PCM sink,
 covering disabled beak suppression, neutral keepalives, manual takeover and completion counters.
+Behavior tests cover event timing, cooldowns, priority, nonrepetition and sensor resets. An opt-in
+test synthesizes all 160 lines, and a real-daemon test verifies an automatic one-shot greeting.
 The demo guide has their exact commands.
 
 Laptop synthesis and FakeIo are not measurements of RK3566 load, physical speaker latency,

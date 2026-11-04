@@ -31,6 +31,7 @@ mod posture;
 mod soc;
 mod sound;
 mod speech;
+mod speech_behavior;
 mod theremin;
 mod vetbook;
 
@@ -2464,6 +2465,16 @@ async fn control_loop<T: RobotIo>(
     {
         voice.enable_speech(params.speech.model.clone());
     }
+    let mut speech_behaviors =
+        (params.audio.enabled && params.speech.enabled && params.speech.behaviors).then(|| {
+            speech_behavior::Behaviors::new(
+                params.audio.greet,
+                Instant::now(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(1, |d| d.as_nanos() as u64),
+            )
+        });
     let pet: Option<pet_detect::worker::PetHandle> = if params.audio.enabled
         && params.audio.pet_detect_resolved(params.policy.mode)
         && let Some(model) = params.audio.pet_model_resolved()
@@ -2549,13 +2560,11 @@ async fn control_loop<T: RobotIo>(
         tracing::warn!("chorale: this robot will sing with others");
     }
 
-    // Say hello in this robot's own voice as the control loop comes up, as the prototype
-    // does — the greet is also the audible "robotd is running" on a headless board. Its
-    // own switch, because the reason to want it gone (restarting the daemon all day) is
-    // not a reason to give up the triggers and the mic that `audio.enabled = false` takes
-    // with it.
+    // Behavior speech waits briefly for its worker to greet. Otherwise keep the bank greeting;
+    // audio.greet remains the common switch for a board being restarted all day.
     if let Some(voice) = voice.as_mut()
         && params.audio.greet
+        && speech_behaviors.is_none()
     {
         voice.play("greet", false);
     }
@@ -2569,6 +2578,7 @@ async fn control_loop<T: RobotIo>(
     while !state.shutdown.load(Ordering::Relaxed) {
         ticker.tick().await;
         let tick_start = Instant::now();
+        let mut speech_edges = speech_behavior::Edges::default();
         if let Some(voice) = voice.as_mut() {
             voice.poll(tick_start);
         }
@@ -2880,9 +2890,8 @@ async fn control_loop<T: RobotIo>(
                 voice.play(tag.as_str(), false);
             }
 
-            // Petting: coo, exactly when the prototype coos — not fallen, no scripted move
-            // in flight. The verdict is used bare here (not the armed fall gate): this is a
-            // sound cue, and cooing while face-down would be worse than staying quiet.
+            // Petting retains the classifier's existing calm gate. When speech is ready, pass
+            // the edge to its arbiter instead of starting a coo that would occupy the PCM.
             if let Some(pet) = pet.as_ref() {
                 while let Some(ev) = pet.try_recv_event() {
                     match ev {
@@ -2895,7 +2904,10 @@ async fn control_loop<T: RobotIo>(
                                 !safety.fallen() && controller.as_ref().is_none_or(|c| !c.busy());
                             if calm {
                                 tracing::info!("petting started");
-                                voice.play("coo", false);
+                                speech_edges.petted = true;
+                                if speech_behaviors.is_none() || !voice.speech_ready() {
+                                    voice.play("coo", false);
+                                }
                             } else {
                                 tracing::debug!("petting detected (ignored: busy or down)");
                             }
@@ -3378,12 +3390,16 @@ async fn control_loop<T: RobotIo>(
                 let p_held = watch.p_held().map(|p| format!("{p:.2}"));
                 match watch.tick(watching, fresh.as_ref(), period) {
                     Some(pickup::Edge::Pause) => {
+                        speech_edges.picked_up = true;
                         tracing::warn!(
                             p_held = watch.p_held().map(|p| format!("{p:.2}")),
                             "picked up — pausing the policy"
                         )
                     }
                     Some(pickup::Edge::Resume) if watching => {
+                        // A failed classifier also releases its pause, but clears p_held.
+                        // Only an actual scored release is a put-down reaction.
+                        speech_edges.put_down = watch.p_held().is_some();
                         tracing::warn!(
                             p_held = watch.p_held().map(|p| format!("{p:.2}")),
                             "put down — handing the robot back to the policy"
@@ -4098,6 +4114,7 @@ async fn control_loop<T: RobotIo>(
             transitioning: pending_swap.is_some() || mode_change.is_some(),
         };
         let requested_speech = intents.take_say();
+        let manual_speech_requested = requested_speech.is_some();
         let mut speech_open = None;
         let mut speech_override = None;
         if let Some(voice) = voice.as_mut() {
@@ -4117,6 +4134,42 @@ async fn control_loop<T: RobotIo>(
                     }
                 } else {
                     tracing::info!("speech intent refused: unsafe state or instrument active");
+                }
+            }
+            if let Some(behaviors) = speech_behaviors.as_mut() {
+                let settled = conditions.audio_allowed()
+                    && !conditions.instrument_busy
+                    && !conditions.skill_busy
+                    && !conditions.transitioning
+                    && (conditions.ready || !conditions.enabled);
+                let available = !manual_speech_requested && settled && voice.speech_available();
+                let utterance = behaviors.tick(
+                    tick_start,
+                    speech_behavior::Facts {
+                        edges: speech_edges,
+                        fresh: conditions.fresh,
+                        down: conditions.fallen || conditions.limp_fall,
+                        still: params.idle.enabled && still && !conditions.instrument_busy,
+                        battery_percent: state.battery().map(|battery| battery.percent),
+                        settled,
+                        available,
+                    },
+                );
+                if let Some(utterance) = utterance {
+                    let text = behaviors.text(utterance).to_owned();
+                    match voice.say(
+                        text.clone(),
+                        tick_start,
+                        snapshot.mouth_revision,
+                        snapshot.mouth,
+                        conditions.mouth_allowed(),
+                    ) {
+                        Ok(()) => {
+                            behaviors.admitted(utterance, tick_start);
+                            tracing::info!(trigger = utterance.trigger.name(), %text, "behavior speech accepted");
+                        }
+                        Err(reason) => tracing::debug!(reason, "behavior speech skipped"),
+                    }
                 }
             }
             if conditions.audio_allowed() && !conditions.instrument_busy {

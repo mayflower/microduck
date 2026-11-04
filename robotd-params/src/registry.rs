@@ -624,6 +624,11 @@ pub const REGISTRY: &[Entry] = &[
         Kind::Bool,
         "Speak text locally with the Heart voice",
     ),
+    feature(
+        "speech.behaviors",
+        Kind::Bool,
+        "Ducky speech for startup, petting, pickup, idle, battery and recovery events",
+    ),
     entry(
         "speech.model",
         Kind::Text,
@@ -1361,6 +1366,7 @@ mod tests {
                 "audio.greet",
                 "audio.pet_detect",
                 "speech.enabled",
+                "speech.behaviors",
                 "media.source",
                 "media.quality",
                 // The six one-shot buttons. Front-page keys because "what does this button do"
