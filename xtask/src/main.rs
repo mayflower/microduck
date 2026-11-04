@@ -344,6 +344,10 @@ fn package(args: PackageArgs) -> Result<(), Box<dyn std::error::Error>> {
         }
         shipped.sort();
 
+        if shipped.iter().any(|name| name == "duck-voice-color") {
+            append_voice_color_source(&mut builder)?;
+        }
+
         for include in &args.includes {
             let (src, dest) = include
                 .split_once('=')
@@ -472,6 +476,56 @@ fn package(args: PackageArgs) -> Result<(), Box<dyn std::error::Error>> {
         "\nnext: cargo xtask sign --dir {} --key <key>",
         args.out.display()
     );
+    Ok(())
+}
+
+/// The standalone GPL audio tool travels with buildable corresponding source in every artifact.
+fn append_voice_color_source<W: std::io::Write>(
+    builder: &mut tar::Builder<W>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    let manifest: toml::Value = toml::from_str(&std::fs::read_to_string(root.join("Cargo.toml"))?)?;
+    let mut workspace = toml::Table::new();
+    workspace.insert("resolver".into(), toml::Value::String("3".into()));
+    workspace.insert(
+        "members".into(),
+        toml::Value::Array(vec![toml::Value::String("duck-voice-color".into())]),
+    );
+    workspace.insert("package".into(), manifest["workspace"]["package"].clone());
+    let mut source_manifest = toml::Table::new();
+    source_manifest.insert("workspace".into(), toml::Value::Table(workspace));
+    append_bytes(
+        builder,
+        "source/Cargo.toml",
+        toml::to_string(&source_manifest)?.as_bytes(),
+        0o644,
+    )?;
+    append_file(
+        builder,
+        &root.join("Cargo.lock"),
+        "source/Cargo.lock",
+        0o644,
+    )?;
+    let tool = root.join("duck-voice-color");
+    for name in ["Cargo.toml", "build.rs", "README.md", "COPYING", "NOTICE"] {
+        append_file(
+            builder,
+            &tool.join(name),
+            &format!("source/duck-voice-color/{name}"),
+            0o644,
+        )?;
+    }
+    for name in ["src", "native", "tests", "vendor"] {
+        builder.append_dir_all(format!("source/duck-voice-color/{name}"), tool.join(name))?;
+    }
+    append_file(
+        builder,
+        &root.join("docs/design/speech.md"),
+        "source/docs/design/speech.md",
+        0o644,
+    )?;
     Ok(())
 }
 

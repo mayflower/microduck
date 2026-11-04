@@ -8,6 +8,7 @@ sudo robotctl configure
 ```
 
 Enable `speech.enabled`, leave `audio.enabled` on and accept the offered `robotd` restart.
+The default `speech.nasal=true` applies the approved voice B. Set it to false for clean Heart.
 With the default `speech.behaviors=true`, the duck also selects from 20 lines for each of
 eight behavior triggers. [The trigger table](../../docs/design/speech.md#behavior-triggers)
 explains their sensor requirements, timing and cooldowns;
@@ -29,7 +30,7 @@ The [speech design](../../docs/design/speech.md) owns limits, model identity and
 Build the same native binaries used on the robot:
 
 ```sh
-cargo +1.94.1 build -p sounds -p robotd -p robotctl
+cargo +1.94.1 build -p sounds -p robotd -p robotctl -p duck-voice-color
 ./target/debug/sounds speech install --model /tmp/paradee-v1.2-int8.onnx
 ./target/debug/sounds speech say "This sentence is synthesized locally." \
   --model /tmp/paradee-v1.2-int8.onnx --device default
@@ -39,6 +40,8 @@ Only installation downloads the model. These commands use no Python or external 
 ONNX Runtime must be installed; `ORT_DYLIB_PATH` can name its shared library.
 Add `--out /tmp/heart.wav` to the `say` command to save a listening sample.
 `sounds speech phonemes TEXT --model PATH` inspects pronunciation.
+Add `--clean` to `sounds speech say` to compare the unprocessed voice. The bundled native
+voice utility performs the normal nasal processing; FFmpeg and Python are not required.
 
 To exercise the daemon and CLI, create parameters and run:
 
@@ -78,6 +81,16 @@ cargo +1.94.1 test -p duck-speech -- --ignored
 cargo +1.94.1 test -p robotd --test speech -- --ignored
 cargo +1.94.1 test -p robotd every_behavior_line_synthesizes -- --ignored
 ```
+
+To compare the processor against the approved listening pair, set `MICRODUCK_B_SOURCE` to
+the clean 24 kHz mono PCM16 WAV and `MICRODUCK_B_REFERENCE` to its approved B WAV, then run:
+
+```sh
+cargo +1.94.1 test -p duck-voice-color --test approved_b -- --ignored
+```
+
+Use the exact clean recording from that audition. Independently synthesized takes can have
+waveform variation, so regenerating the text is not a substitute for its reference input.
 
 For a reusable listening package, provide a JSON array of `{ "id": "sample_00", "text": "Hello." }`
 objects, then run:

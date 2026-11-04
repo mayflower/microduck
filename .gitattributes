@@ -1,0 +1,2 @@
+# Preserve the pinned upstream DSP sources verbatim.
+duck-voice-color/vendor/rubberband/** linguist-vendored -whitespace

@@ -351,6 +351,7 @@ cp "$BIN"/mediad staged/
 # The voice generator (postinstall renders the per-robot bank with it) and the
 # mic classifier pair — pet-detect for live listening, pet-features for training.
 cp "$BIN"/sounds staged/
+cp "$BIN"/duck-voice-color staged/
 cp "$BIN"/pet-detect staged/
 cp "$BIN"/pet-features staged/
 # The head ToF daemon. Its unit is packaged below; a board with no sensor

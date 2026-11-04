@@ -13,6 +13,7 @@ arc-swap = "1"
 loqui-g2p = "=0.4.0"
 ort = { version = "=2.0.0-rc.11", default-features = false, features = ["load-dynamic"] }
 libloading = "0.8"
+libc = "0.2"
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.11.0"

@@ -209,6 +209,27 @@ fn the_artifact_carries_what_install_sh_reads() {
     for workflow in PACKAGING_SITES {
         let entries = packaged_release(workflow);
 
+        // A shipped GPL processor must carry its actual buildable sources and notices.
+        for file in [
+            "bin/duck-voice-color",
+            "source/Cargo.toml",
+            "source/Cargo.lock",
+            "source/duck-voice-color/Cargo.toml",
+            "source/duck-voice-color/build.rs",
+            "source/duck-voice-color/COPYING",
+            "source/duck-voice-color/NOTICE",
+            "source/duck-voice-color/src/main.rs",
+            "source/duck-voice-color/native/process.cpp",
+            "source/duck-voice-color/vendor/rubberband/COPYING",
+            "source/duck-voice-color/vendor/rubberband/single/RubberBandSingle.cpp",
+            "source/duck-voice-color/vendor/rubberband/src/finer/R3Stretcher.cpp",
+        ] {
+            assert!(
+                entries.contains_key(file),
+                "{workflow}: missing voice-color source {file}"
+            );
+        }
+
         // install.sh dies outright without these two: "a robot without it has nothing to run".
         for unit in ["systemd/updaterd.service", "systemd/robotd.service"] {
             assert!(

@@ -35,7 +35,7 @@ pub struct Worker {
     busy: Arc<AtomicBool>,
 }
 impl Worker {
-    pub fn spawn(model: PathBuf) -> Result<Self> {
+    pub fn spawn(model: PathBuf, nasal: bool) -> Result<Self> {
         let (tx, rx) = mpsc::sync_channel::<Request>(1);
         let status = Arc::new(AtomicU8::new(STARTING));
         let busy = Arc::new(AtomicBool::new(false));
@@ -50,7 +50,7 @@ impl Worker {
                     libc::setpriority(libc::PRIO_PROCESS, 0, 10);
                 }
                 let initialized = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    Engine::new(&model)
+                    Engine::with_nasal(&model, nasal)
                 }));
                 let mut engine = match initialized {
                     Ok(Ok(engine)) => engine,
@@ -169,7 +169,8 @@ mod tests {
     use super::*;
     #[test]
     fn missing_assets_do_not_make_an_optional_worker_ready() {
-        let worker = Worker::spawn(PathBuf::from("/nonexistent/microduck-speech.onnx")).unwrap();
+        let worker =
+            Worker::spawn(PathBuf::from("/nonexistent/microduck-speech.onnx"), true).unwrap();
         let end = std::time::Instant::now() + std::time::Duration::from_secs(2);
         while worker.status.load(Ordering::Acquire) == STARTING {
             assert!(std::time::Instant::now() < end);

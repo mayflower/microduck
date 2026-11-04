@@ -1,5 +1,6 @@
 //! On-demand speech, entirely local: English text → Misaki phonemes → Paradee Heart PCM.
 //! [The design](../../docs/design/speech.md) owns synthesis and integration contracts.
+mod color;
 use std::path::Path;
 use std::sync::{
     Arc,
@@ -23,7 +24,11 @@ pub const LICENSES: &str = concat!(
     "\nNative frontend, loqui-g2p 0.4.0:\n",
     include_str!("../assets/LICENSE-Loqui"),
     "\nUpstream loqui notices (only its G2P component is linked here):\n",
-    include_str!("../assets/NOTICE-Loqui")
+    include_str!("../assets/NOTICE-Loqui"),
+    "\nSeparate voice-color utility (not linked into this library):\n",
+    include_str!("../../duck-voice-color/NOTICE"),
+    "\nVoice-color utility license:\n",
+    include_str!("../../duck-voice-color/COPYING")
 );
 
 pub const SAMPLE_RATE: u32 = 24_000;
@@ -111,10 +116,17 @@ pub struct Engine {
     session: Session,
     g2p: G2p,
     vocab: std::collections::HashMap<char, i64>,
+    color: Option<color::Color>,
 }
 impl Engine {
     pub fn new(model: &Path) -> Result<Self> {
+        Self::with_nasal(model, true)
+    }
+
+    /// Disable nasal color for an unprocessed Heart reference. The robot defaults to preset B.
+    pub fn with_nasal(model: &Path, nasal: bool) -> Result<Self> {
         verify_model(model)?;
+        let color = nasal.then(color::Color::discover).transpose()?;
         let config: Config = serde_json::from_str(include_str!("../assets/paradee-v1.2.json"))?;
         ensure!(
             config.sample_rate == SAMPLE_RATE && config.voices.first().is_some_and(|v| v == VOICE),
@@ -161,6 +173,7 @@ impl Engine {
         );
         Ok(Self {
             session,
+            color,
             g2p: G2p::new(Dialect::American, OovFallback::Neural)?,
             vocab: config.vocab,
         })
@@ -233,6 +246,12 @@ impl Engine {
             );
             pcm.extend_from_slice(audio);
         }
+        let pcm = if let Some(color) = &self.color {
+            color.apply(pcm, cancel)?
+        } else {
+            pcm
+        };
+        cancel.check()?;
         Audio::new(pcm)
     }
 }

@@ -2463,7 +2463,7 @@ async fn control_loop<T: RobotIo>(
     if params.speech.enabled
         && let Some(voice) = voice.as_mut()
     {
-        voice.enable_speech(params.speech.model.clone());
+        voice.enable_speech(params.speech.model.clone(), params.speech.nasal);
     }
     let mut speech_behaviors =
         (params.audio.enabled && params.speech.enabled && params.speech.behaviors).then(|| {
@@ -5668,7 +5668,7 @@ fn dispatch(
             } else if let Err(error) = duck_speech::validate_text(&p.text) {
                 Some(format!("invalid_text: {error}"))
             } else if !state.speech_ready.load(Ordering::Acquire) {
-                Some("speech_not_ready: install the model with sounds speech install and restart robotd; inspect the journal if it stays unavailable".into())
+                Some("speech_not_ready: install the matching full daemon bundle and speech model, restart robotd, and inspect the journal".into())
             } else if !state.speech_available.load(Ordering::Acquire) {
                 Some("audio_busy_or_unsafe".into())
             } else if !intents.request_say(p.text.clone()) {

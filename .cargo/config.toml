@@ -6,7 +6,7 @@
 # `aarch64-unknown-linux-gnu` share a CPU but not an OS, libc or ABI.
 #
 # `cargo board` uses `cargo zigbuild`, not plain `cargo build`. `zig cc` supplies the
-# cross sysroot and — crucially — a C compiler for the one C dependency (`zstd`),
+# cross sysroot and — crucially — C/C++ compilers for compression and the standalone voice DSP,
 # which plain cargo has no linker for on macOS.
 #
 # The `.2.31` suffix pins glibc (a cargo-zigbuild feature, not cargo syntax). We ship

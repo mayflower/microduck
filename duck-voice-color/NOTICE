@@ -1,0 +1,16 @@
+duck-voice-color is a separate GPL-3.0-or-later executable.
+
+It includes Rubber Band Library 4.0.0, copyright 2007-2024 Particular Programs Ltd,
+under GPL-2.0-or-later. Upstream revision:
+1d95888bec3ae0a17c0c4af791810d5a63f6bc35
+https://github.com/breakfastquay/rubberband
+
+The vendor directory preserves upstream sources and license notices. Its single-file
+build uses the bundled FFT and resampler (Accelerate on macOS), with no system Rubber
+Band, FFTW or libsndfile dependency. The main runtime uses this executable through
+standard raw PCM pipes and does not link Rubber Band.
+
+Loudness measurement uses ebur128 0.1.11, copyright Sebastian Dröge, under MIT.
+https://github.com/sdroege/ebur128
+
+The release includes the tool's source and build instructions under source/.

@@ -150,6 +150,9 @@ enum SpeechCmd {
     /// Synthesize text locally with the approved Heart voice; play it or write a WAV.
     Say {
         text: String,
+        /// Use unprocessed Heart instead of the default nasal preset B.
+        #[arg(long)]
+        clean: bool,
         #[arg(long, default_value = duck_speech::DEFAULT_MODEL_PATH)]
         model: PathBuf,
         #[arg(long)]
@@ -393,16 +396,20 @@ fn main() -> Result<()> {
             }
             SpeechCmd::Licenses => println!("{}", duck_speech::LICENSES),
             SpeechCmd::Phonemes { text, model } => {
-                println!("{}", duck_speech::Engine::new(&model)?.phonemes(&text)?);
+                println!(
+                    "{}",
+                    duck_speech::Engine::with_nasal(&model, false)?.phonemes(&text)?
+                );
             }
             SpeechCmd::Say {
                 text,
+                clean,
                 model,
                 out,
                 device,
             } => {
-                let audio =
-                    duck_speech::Engine::new(&model)?.synthesize(&text, &Default::default())?;
+                let audio = duck_speech::Engine::with_nasal(&model, !clean)?
+                    .synthesize(&text, &Default::default())?;
                 if let Some(path) = out {
                     let spec = hound::WavSpec {
                         channels: 1,

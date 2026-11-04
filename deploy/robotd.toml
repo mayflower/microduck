@@ -566,6 +566,7 @@ mode = "walk"
 [speech]
 # enabled = false
 # behaviors = true
+# nasal = true
 # model = "/var/lib/robot/speech/paradee-v1.2-int8.onnx"
 # mouth_offset_ms = 0
 

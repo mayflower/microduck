@@ -362,8 +362,8 @@ impl Sound {
         }
     }
 
-    pub fn enable_speech(&mut self, model: PathBuf) {
-        self.speech_worker = crate::speech::Worker::spawn(model)
+    pub fn enable_speech(&mut self, model: PathBuf, nasal: bool) {
+        self.speech_worker = crate::speech::Worker::spawn(model, nasal)
             .map_err(|error| tracing::warn!(%error, "cannot start speech worker"))
             .ok();
     }

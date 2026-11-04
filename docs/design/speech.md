@@ -1,8 +1,9 @@
 # On-device speech
 
 This page owns English text-to-speech, its model, playback ownership and beak timing.
-The robot synthesizes each request locally with Paradee v1.2's `af_heart` voice. It keeps
-Heart's original pitch and timbre. The [demo](../../demos/speech/README.md) owns runnable examples.
+The robot synthesizes each request locally with Paradee v1.2's `af_heart` voice, using the
+approved nasal preset B by default. Pitch and timing stay unchanged while vocal resonance
+shifts upward. The [demo](../../demos/speech/README.md) owns runnable examples.
 
 ## Text becomes audio on the robot
 
@@ -16,7 +17,9 @@ English phonemizer and ONNX model once. Each `robot.say` request follows this pa
    they are never silently dropped to make an input fit.
 3. Run the pinned INT8 Paradee model with `voice=0` (`af_heart`) and `speed=1.0`. It predicts
    the speech and produces 24 kHz mono PCM. The complete request is synthesized before playback.
-4. Pass PCM directly to the existing exclusive audio player. An amplitude envelope derived
+4. With `speech.nasal=true`, pass the samples through the native `duck-voice-color` utility
+   using raw PCM pipes. Its R3 formant ratio is 1.5; pitch and time ratios are exactly 1.0.
+5. Pass the final PCM to the existing exclusive audio player. An amplitude envelope derived
    from those exact samples proposes beak targets through the normal servo safety path.
 
 There is no speech WAV bank or intermediate audio file in the daemon path. The optional
@@ -48,7 +51,8 @@ With speech or master audio disabled it performs no download. An installation fa
 optional speech never makes a moving robot unhealthy. The updater's hook timeout is unchanged.
 The same installer works before first activation and with `--model PATH` for development.
 
-`[speech]` defaults to `enabled=false`, `behaviors=true`, the model path above and `mouth_offset_ms=0`.
+`[speech]` defaults to `enabled=false`, `behaviors=true`, `nasal=true`, the model path above
+and `mouth_offset_ms=0`.
 Configuration changes require a `robotd` restart. `audio.enabled` is the master prerequisite.
 The model and the legacy quack bank are independent: speech can work without rendered quacks.
 
@@ -56,6 +60,39 @@ The model/configuration use Apache-2.0. The native frontend uses MIT code with a
 Apache-2.0 language data and neural weights. `sounds speech licenses` prints the bundled notices.
 `Cargo.lock` fixes the frontend implementation. Its Rust requirement raises this workspace's
 compiler floor to 1.92, within the Yocto ceiling of 1.94.1.
+
+## Approved voice color B
+
+`duck-voice-color` applies Rubber Band 4.0.0 R3 with formant preservation enabled and an
+explicit formant ratio of 1.5. The preservation option is necessary at unity pitch/time;
+omitting it bypasses the intended resonance change. This is the approved B treatment,
+without the tremolo, EQ or added roughness used for the rejected C audition.
+
+The utility measures integrated loudness with EBU R128 and requests -21 LUFS, limiting static
+gain to ±12 dB and reducing it further if necessary to keep sample peaks at or below 0.8.
+Silent or very short buffers receive no loudness boost. There is no added noise or modulation.
+The audition's FFmpeg peak limiter is replaced by whole-buffer peak headroom, so level can differ
+slightly on unusually peaky speech. The R3 color and every utterance's sample count are preserved.
+
+The synthesis worker supervises the utility for each utterance. Input and output are bounded
+raw mono f32le pipes; no WAV or temporary audio file is written. The child is canceled if the
+request is canceled, fails, exceeds its output bound or runs beyond 20 seconds. The existing
+20-second overall synthesis deadline still applies. Writer threads mask SIGPIPE so a canceled
+child cannot terminate `robotd`. Nonfinite, oversized or length-changing output is refused.
+Beak envelopes are computed after coloring and follow the actual final samples.
+
+The utility ships beside `robotd` and `sounds`; no system Rubber Band, Python, FFmpeg, FFTW or
+libsndfile installation is needed. It contains unmodified upstream sources pinned to revision
+`1d95888bec3ae0a17c0c4af791810d5a63f6bc35`, with the built-in FFT/resampler build. It is a
+separate GPL-3.0-or-later executable; the runtime library does not link it. Every artifact
+carrying the utility also carries its corresponding source, build manifest, lockfile and
+notices under `source/`. `duck-voice-color --licenses` prints its notices.
+
+The worker checks the adjacent tool's protocol version before becoming ready. A missing or
+incompatible tool makes nasal speech unavailable with a diagnostic; it never silently substitutes
+a different voice. Install a matching full daemon bundle. `speech.nasal=false` selects clean
+Heart without this utility; `sounds speech say --clean` provides the same reference for listening.
+`MICRODUCK_VOICE_COLOR` can explicitly name a development build of the utility.
 
 ## Behavior triggers
 

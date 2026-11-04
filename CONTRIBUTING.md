@@ -8,6 +8,9 @@ For working on the daemons themselves. To use a robot rather than change it, see
 Needs Rust **1.92+** (stable). The robot is aarch64 Linux; you develop on Linux or macOS, and
 the two are not quite the same checkout — see below.
 
+The standalone voice-color utility also needs a C++17 compiler; Cargo builds its vendored DSP.
+The board cross-build uses Zig's C++ compiler, and native builds use the host compiler.
+
 That number is a ceiling too. The Yocto image (`microduck_yocto`) builds each release from
 source with the Rust its OpenEmbedded release ships, **1.94.1** on wrynose, so code here must not
 need anything newer — even when stable has a nicer API and deprecates the old one, which with
@@ -96,6 +99,7 @@ the libraries they drive — no sockets, no systemd, nothing starts them
   robotd-params/  robotd's startup parameters: schema, defaults, validation
 
 the tools
+  duck-voice-color/ standalone GPL audio utility for nasal speech; native C++ DSP built by Cargo
   robotctl/       the local CLI, including `monitor`
   duckctl/        the laptop-side client — never shipped, never cross-built
   xtask/          package · sign · promote — build tooling, never shipped

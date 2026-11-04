@@ -1401,6 +1401,7 @@ mod head_imu_tests {
 pub struct SpeechParams {
     pub enabled: bool,
     pub behaviors: bool,
+    pub nasal: bool,
     pub model: PathBuf,
     pub mouth_offset_ms: i32,
 }
@@ -1409,6 +1410,7 @@ impl Default for SpeechParams {
         Self {
             enabled: false,
             behaviors: true,
+            nasal: true,
             model: PathBuf::from("/var/lib/robot/speech/paradee-v1.2-int8.onnx"),
             mouth_offset_ms: 0,
         }
@@ -3260,6 +3262,7 @@ mod tests {
         let mut params = super::Params::default();
         assert!(!params.speech.enabled);
         assert!(params.speech.behaviors);
+        assert!(params.speech.nasal);
         assert_eq!(params.speech.mouth_offset_ms, 0);
         for offset in [-250, 0, 250] {
             params.speech.mouth_offset_ms = offset;
