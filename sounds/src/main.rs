@@ -26,6 +26,11 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// On-device Heart speech: install the pinned model or synthesize new text.
+    Speech {
+        #[command(subcommand)]
+        command: SpeechCmd,
+    },
     /// Print the personality traits behind a seed.
     Show {
         #[arg(long)]
@@ -130,6 +135,95 @@ enum Cmd {
     },
 }
 
+#[derive(Subcommand)]
+enum SpeechCmd {
+    /// Download and verify the pinned model once. Synthesis itself is offline.
+    Install {
+        #[arg(long, conflicts_with = "if_enabled")]
+        model: Option<PathBuf>,
+        /// Install only when this layered robotd configuration enables speech and audio.
+        #[arg(long)]
+        if_enabled: Option<PathBuf>,
+    },
+    /// Show the model and native frontend redistribution notices.
+    Licenses,
+    /// Synthesize text locally with the approved Heart voice; play it or write a WAV.
+    Say {
+        text: String,
+        #[arg(long, default_value = duck_speech::DEFAULT_MODEL_PATH)]
+        model: PathBuf,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long, default_value = "plughw:aic3104")]
+        device: String,
+    },
+    /// Inspect the native English phonemizer used for speech.
+    Phonemes {
+        text: String,
+        #[arg(long, default_value = duck_speech::DEFAULT_MODEL_PATH)]
+        model: PathBuf,
+    },
+}
+
+fn install_speech(model: &Path) -> Result<()> {
+    let parent = model
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let mut lock_name = model.as_os_str().to_os_string();
+    lock_name.push(".lock");
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(PathBuf::from(lock_name))?;
+    lock.try_lock()
+        .context("another speech installer is running")?;
+    if duck_speech::verify_model(model).is_ok() {
+        println!(
+            "Heart speech model already installed at {}",
+            model.display()
+        );
+        return Ok(());
+    }
+    // A unique staging file also isolates a curl child left behind by a killed installer.
+    let staging = tempfile::NamedTempFile::new_in(parent)?;
+    let status = Command::new("curl")
+        .args([
+            "--fail",
+            "--location",
+            "--silent",
+            "--show-error",
+            "--connect-timeout",
+            "5",
+            "--max-time",
+            "30",
+            "--max-filesize",
+            "9000000",
+            "--output",
+        ])
+        .arg(staging.path())
+        .arg(duck_speech::MODEL_URL)
+        .status()
+        .context("running curl to install speech model")?;
+    anyhow::ensure!(status.success(), "speech model download failed");
+    duck_speech::verify_model(staging.path())?;
+    // Root commonly installs it, while robotd reads it as the robot service user.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        staging
+            .as_file()
+            .set_permissions(std::fs::Permissions::from_mode(0o644))?;
+    }
+    staging.as_file().sync_all()?;
+    staging.persist(model)?;
+    std::fs::File::open(parent)?.sync_all()?;
+    println!("Installed Paradee v1.2 Heart at {}", model.display());
+    Ok(())
+}
+
 /// The seed to voice: given, or derived from the hardware.
 fn resolve_seed(seed: Option<u32>) -> Result<u32> {
     match seed {
@@ -165,10 +259,14 @@ fn show(p: &Personality) {
 
 /// Pipe a rendered buffer into `aplay`, falling back to the default device off the robot.
 fn play_pcm(buf: &[f32], device: &str) -> Result<()> {
+    play_pcm_at(buf, sounds::SR, device)
+}
+
+fn play_pcm_at(buf: &[f32], rate: u32, device: &str) -> Result<()> {
     let play = |device: Option<&str>| -> Result<bool> {
         let mut cmd = Command::new("aplay");
         cmd.args(["-q", "-t", "raw", "-f", "S16_LE", "-c", "1", "-r"])
-            .arg(sounds::SR.to_string());
+            .arg(rate.to_string());
         if let Some(d) = device {
             cmd.args(["-D", d]);
         }
@@ -280,6 +378,49 @@ fn load_score(path: &Path) -> Result<chorale::Score> {
 
 fn main() -> Result<()> {
     match Args::parse().command {
+        Cmd::Speech { command } => match command {
+            SpeechCmd::Install { model, if_enabled } => {
+                let model = if let Some(config) = if_enabled {
+                    let params = robotd_params::Params::load(&config, true)?;
+                    if !params.audio.enabled || !params.speech.enabled {
+                        return Ok(());
+                    }
+                    params.speech.model
+                } else {
+                    model.unwrap_or_else(|| PathBuf::from(duck_speech::DEFAULT_MODEL_PATH))
+                };
+                install_speech(&model)?;
+            }
+            SpeechCmd::Licenses => println!("{}", duck_speech::LICENSES),
+            SpeechCmd::Phonemes { text, model } => {
+                println!("{}", duck_speech::Engine::new(&model)?.phonemes(&text)?);
+            }
+            SpeechCmd::Say {
+                text,
+                model,
+                out,
+                device,
+            } => {
+                let audio =
+                    duck_speech::Engine::new(&model)?.synthesize(&text, &Default::default())?;
+                if let Some(path) = out {
+                    let spec = hound::WavSpec {
+                        channels: 1,
+                        sample_rate: duck_speech::SAMPLE_RATE,
+                        bits_per_sample: 16,
+                        sample_format: hound::SampleFormat::Int,
+                    };
+                    let mut writer = hound::WavWriter::create(&path, spec)?;
+                    for sample in sounds::synth::to_i16(&audio.pcm) {
+                        writer.write_sample(sample)?;
+                    }
+                    writer.finalize()?;
+                    println!("Wrote {}", path.display());
+                } else {
+                    play_pcm_at(&audio.pcm, duck_speech::SAMPLE_RATE, &device)?;
+                }
+            }
+        },
         Cmd::Show { seed } => {
             let p = Personality::from_seed(resolve_seed(seed)?);
             show(&p);

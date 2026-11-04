@@ -1425,3 +1425,16 @@ eval "$(robotctl completions bash)"
 
 `zsh`, `fish`, `elvish` and `powershell` work in place of `bash`.
 
+## On-device speech
+
+Install the model with `sudo /opt/robot/daemon/current/bin/sounds speech install`, enable
+`speech.enabled` in `sudo robotctl configure` and restart `robotd`. Then:
+
+```sh
+robotctl say "Hello, human."
+robotctl say "What a quacktastic day." --json
+```
+
+Text is synthesized locally with Heart. The reply confirms intent acceptance; playback can
+still be refused by the control loop. [The speech design](../design/speech.md) owns the
+contract; [the demo](../../demos/speech/README.md) covers local development and model tests.

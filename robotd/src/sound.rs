@@ -1,4 +1,4 @@
-//! The robot's voice, at play time: pick a wav from the bank, feed it to `aplay`.
+//! The robot's exclusive PCM owner: bank sounds, live instruments and local speech.
 //!
 //! Ported from the prototype's `play_voice` / `start_wheee`. The codec PCM is exclusive and
 //! single-client, which two properties fall out of:
@@ -14,14 +14,17 @@
 //!    its loop and writes the end segment into a pipe that is still open. Only the second
 //!    one ever plays `wheee_end_*`, which is why [`Ride`] is a state and not a bool.
 //!
-//!  - **The theremin is synthesized, not played.** Every other sound here is a wav the
-//!    bank rendered in advance, which works because their shape is known in advance. A
+//!  - **The theremin is synthesized, not played.** Bank sounds are rendered in advance,
+//!    which works because their shape is known in advance. A
 //!    theremin's pitch is a hand's distance — 15 new values a second, none of them known
 //!    until they arrive — so there is no file to pick. Its writer thread pulls blocks from
 //!    a live [`sounds::Stream`] instead, reading the parameters the control loop last
 //!    stored, and stays much closer behind playback than the ride does: a ride's 250 ms
 //!    lead only delays its release, while the same lead on an instrument is the gap between
 //!    moving your hand and hearing it.
+//!
+//! On-device speech and its playback/beak contract are described in
+//! [the speech design](../../docs/design/speech.md).
 //!
 //! Playing is spawning: nothing here blocks the 50 Hz tick except the deliberately blocking
 //! goodbye peck right before power-off, when there is no tick left to miss — and that one is
@@ -101,6 +104,21 @@ enum Ride {
     /// The chorale holds the PCM: a writer thread is rendering one part of a score at whatever
     /// position the loop last published.
     Singing,
+    Speech,
+}
+
+const SPEECH_WRITING: u8 = 0;
+const SPEECH_WRITTEN: u8 = 1;
+const SPEECH_WRITE_FAILED: u8 = 2;
+struct SpeechPlayback {
+    pending: Option<crate::speech::Pending>,
+    requested: Instant,
+    started: Option<Instant>,
+    mouth: Option<duck_speech::Mouth>,
+    playing: Arc<AtomicBool>,
+    writer: Arc<std::sync::atomic::AtomicU8>,
+    mouth_revision: u64,
+    relinquished: bool,
 }
 
 /// The theremin's parameters, as the control loop hands them to the writer thread.
@@ -175,6 +193,12 @@ pub struct Sound {
     bank: PathBuf,
     device: String,
     child: Option<Child>,
+    retiring: Option<Child>,
+    pending_sound: Option<String>,
+    player: PathBuf,
+    speech_worker: Option<crate::speech::Worker>,
+    speech: Option<SpeechPlayback>,
+    speech_echo_until: Option<Instant>,
     /// The wheee rider loops while this is true. Shared with the writer thread; clearing
     /// it *without* killing the child is what makes the end segment play.
     wheee_held: Arc<AtomicBool>,
@@ -204,6 +228,12 @@ impl Sound {
             bank,
             device,
             child: None,
+            retiring: None,
+            pending_sound: None,
+            player: PathBuf::from("aplay"),
+            speech_worker: None,
+            speech: None,
+            speech_echo_until: None,
             wheee_held: Arc::new(AtomicBool::new(false)),
             ride: Ride::Off,
             played: 0,
@@ -236,22 +266,288 @@ impl Sound {
 
     /// Stop whatever is on the PCM, now. The ride's abrupt exit, and what every one-shot
     /// does to its predecessor.
-    fn stop_child(&mut self) {
+    fn stop_child(&mut self) -> bool {
         self.wheee_held.store(false, Ordering::Relaxed);
-        // A theremin writer blocked in `write_all` on a pipe whose reader is about to die
-        // needs telling as well: clearing this is what gets it out of its loop, and the
-        // `EPIPE` its next write returns is what gets it out if it was already inside one.
         if let Some(live) = self.live.take() {
             live.playing.store(false, Ordering::Relaxed);
         }
         self.singing = None;
-        self.ride = Ride::Off;
-        if let Some(mut child) = self.child.take()
-            && let Ok(None) = child.try_wait()
-        {
-            let _ = child.kill();
-            let _ = child.wait();
+        if let Some(speech) = self.speech.take() {
+            speech.playing.store(false, Ordering::Relaxed);
+            if speech.started.is_some() {
+                self.speech_echo_until = Some(Instant::now() + Duration::from_secs(2));
+            }
+            tracing::info!("speech interrupted");
         }
+        self.ride = Ride::Off;
+        if let Some(mut child) = self.child.take() {
+            match child.try_wait() {
+                Ok(Some(_)) => {}
+                _ => {
+                    let _ = child.kill();
+                    debug_assert!(self.retiring.is_none());
+                    self.retiring = Some(child);
+                }
+            }
+        }
+        self.reap_retiring();
+        self.retiring.is_none()
+    }
+
+    fn reap_retiring(&mut self) {
+        if self
+            .retiring
+            .as_mut()
+            .is_some_and(|c| matches!(c.try_wait(), Ok(Some(_))))
+        {
+            self.retiring = None;
+        }
+    }
+
+    pub fn poll(&mut self, now: Instant) {
+        self.reap_retiring();
+        if self.ride == Ride::Speech {
+            let outcome = if let Some(speech) = self.speech.as_ref() {
+                if let Some(started) = speech.started {
+                    let timeout = speech
+                        .mouth
+                        .as_ref()
+                        .map_or(Duration::from_secs(30), |m| m.duration())
+                        + Duration::from_millis(1500);
+                    match self.child.as_mut().map(|c| c.try_wait()) {
+                        Some(Ok(Some(status))) => Some(
+                            status.success()
+                                && speech.writer.load(Ordering::Acquire) == SPEECH_WRITTEN,
+                        ),
+                        Some(Ok(None)) if now.saturating_duration_since(started) < timeout => None,
+                        _ => Some(false),
+                    }
+                } else if now.saturating_duration_since(speech.requested) > Duration::from_secs(20)
+                {
+                    Some(false)
+                } else {
+                    None
+                }
+            } else {
+                Some(false)
+            };
+            if let Some(success) = outcome {
+                if let Some(speech) = self.speech.take() {
+                    speech.playing.store(false, Ordering::Relaxed);
+                    if speech.started.is_some() {
+                        self.speech_echo_until = Some(now + Duration::from_secs(2));
+                    }
+                }
+                self.ride = Ride::Off;
+                self.stop_child();
+                if success {
+                    self.played += 1;
+                    tracing::info!("SpeechSpoken");
+                } else {
+                    tracing::warn!("speech failed or timed out");
+                }
+            }
+        } else if self.ride == Ride::Off
+            && self
+                .child
+                .as_mut()
+                .is_some_and(|c| matches!(c.try_wait(), Ok(Some(_))))
+        {
+            self.child = None;
+        }
+        if self.audio_idle()
+            && let Some(tag) = self.pending_sound.take()
+        {
+            self.play(&tag, false);
+        }
+    }
+
+    pub fn enable_speech(&mut self, model: PathBuf) {
+        self.speech_worker = crate::speech::Worker::spawn(model)
+            .map_err(|error| tracing::warn!(%error, "cannot start speech worker"))
+            .ok();
+    }
+    pub fn speech_ready(&self) -> bool {
+        self.speech_worker.as_ref().is_some_and(|w| w.ready())
+    }
+    pub fn speech_available(&self) -> bool {
+        self.audio_idle()
+            && self.pending_sound.is_none()
+            && self.speech_worker.as_ref().is_some_and(|w| w.available())
+    }
+    pub fn audio_idle(&self) -> bool {
+        self.ride == Ride::Off && self.child.is_none() && self.retiring.is_none()
+    }
+    pub fn speech_active(&self) -> bool {
+        self.speech.is_some()
+    }
+    pub fn speech_relinquished(&self) -> bool {
+        self.speech.as_ref().is_some_and(|s| s.relinquished)
+    }
+    pub fn suppress_pet(&self, now: Instant) -> bool {
+        self.speech_active() || self.speech_echo_until.is_some_and(|t| now < t)
+    }
+    pub fn say(
+        &mut self,
+        text: String,
+        now: Instant,
+        revision: u64,
+        manual: f64,
+        mouth_allowed: bool,
+    ) -> Result<(), &'static str> {
+        if !self.speech_available() {
+            return Err("audio_busy");
+        }
+        let pending = self
+            .speech_worker
+            .as_ref()
+            .ok_or("speech_not_ready")?
+            .request(text)
+            .map_err(|_| "speech_busy")?;
+        self.speech = Some(SpeechPlayback {
+            pending: Some(pending),
+            requested: now,
+            started: None,
+            mouth: None,
+            playing: Arc::new(AtomicBool::new(true)),
+            writer: Arc::new(std::sync::atomic::AtomicU8::new(SPEECH_WRITING)),
+            mouth_revision: revision,
+            relinquished: !mouth_allowed || manual.abs() > 1e-6,
+        });
+        self.ride = Ride::Speech;
+        Ok(())
+    }
+    pub fn cancel_speech(&mut self) {
+        if self.speech_active() {
+            self.stop_child();
+        }
+    }
+
+    /// Only called after this tick's safety and instrument decisions are known.
+    pub fn advance_speech(&mut self) {
+        let result = self
+            .speech
+            .as_ref()
+            .and_then(|s| s.pending.as_ref())
+            .and_then(|p| match p.reply.try_recv() {
+                Ok(result) => Some(result),
+                Err(std::sync::mpsc::TryRecvError::Empty) => None,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    Some(Err(anyhow::anyhow!("speech worker disconnected")))
+                }
+            });
+        let Some(result) = result else {
+            return;
+        };
+        let audio = match result {
+            Ok(audio) => audio,
+            Err(error) => {
+                tracing::warn!(%error, "speech synthesis failed");
+                self.cancel_speech();
+                return;
+            }
+        };
+        let child = Command::new(&self.player)
+            .args([
+                "-q",
+                "-D",
+                &self.device,
+                "-t",
+                "raw",
+                "-f",
+                "S16_LE",
+                "-c",
+                "1",
+                "-r",
+                "24000",
+                "--buffer-time=40000",
+                "--period-time=10000",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        let mut child = match child {
+            Ok(child) => child,
+            Err(error) => {
+                tracing::warn!(%error, "speech player failed");
+                self.cancel_speech();
+                return;
+            }
+        };
+        let Some(mut stdin) = child.stdin.take() else {
+            let _ = child.kill();
+            self.retiring = Some(child);
+            self.cancel_speech();
+            return;
+        };
+        self.child = Some(child);
+        let speech = self.speech.as_mut().expect("speech result has an owner");
+        speech.pending = None;
+        speech.started = Some(Instant::now());
+        speech.mouth = Some(audio.mouth);
+        let playing = speech.playing.clone();
+        let writer = speech.writer.clone();
+        if std::thread::Builder::new()
+            .name("speech-pcm".into())
+            .spawn(move || {
+                use std::io::Write;
+                block_sigpipe();
+                let started = Instant::now();
+                let mut sent = 0usize;
+                for block in audio.pcm.chunks(240) {
+                    if !playing.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    // Pack PCM16, not f32: aplay's format and the envelope share one sample clock.
+                    let bytes: Vec<_> = block
+                        .iter()
+                        .flat_map(|s| {
+                            (((*s).clamp(-1.0, 1.0) * 32767.0).round() as i16).to_le_bytes()
+                        })
+                        .collect();
+                    if stdin.write_all(&bytes).is_err() {
+                        writer.store(SPEECH_WRITE_FAILED, Ordering::Release);
+                        return;
+                    }
+                    sent += block.len();
+                    let ahead = sent as f64 / f64::from(duck_speech::SAMPLE_RATE)
+                        - started.elapsed().as_secs_f64();
+                    if ahead > 0.03 {
+                        std::thread::sleep(Duration::from_secs_f64(ahead - 0.03));
+                    }
+                }
+                writer.store(SPEECH_WRITTEN, Ordering::Release);
+            })
+            .is_err()
+        {
+            tracing::warn!("cannot start speech PCM writer");
+            self.cancel_speech();
+        }
+    }
+
+    /// A changed manual command, skill or unsafe servo state relinquishes this entire utterance.
+    pub fn speech_mouth(
+        &mut self,
+        now: Instant,
+        revision: u64,
+        allowed: bool,
+        offset_ms: i32,
+    ) -> Option<f64> {
+        let speech = self.speech.as_mut()?;
+        if revision != speech.mouth_revision || !allowed {
+            speech.relinquished = true;
+        }
+        if speech.relinquished {
+            return None;
+        }
+        let started = speech.started?;
+        Some(
+            speech
+                .mouth
+                .as_ref()?
+                .at(now.saturating_duration_since(started), offset_ms),
+        )
     }
 
     /// The ride's *other* exit: let the writer out of its loop but leave the pipe open, so
@@ -290,11 +586,27 @@ impl Sound {
         //
         // The blocking goodbye peck is the exception, and the only one: it is the last
         // sound this process makes, so it takes the PCM off whatever holds it.
+        if self.speech_active() && tag == "alarm" {
+            self.cancel_speech();
+        }
+        if self.speech_active() && !blocking {
+            return;
+        }
         if self.ride != Ride::Off && !blocking {
             tracing::debug!(tag, "sound skipped: the wheee ride has the PCM");
             return;
         }
-        self.stop_child();
+        self.pending_sound = None;
+        if !self.stop_child() {
+            if blocking {
+                if let Some(mut old) = self.retiring.take() {
+                    wait_bounded(&mut old, BLOCKING_PLAY_MAX);
+                }
+            } else {
+                self.pending_sound = Some(tag.to_owned());
+                return;
+            }
+        }
         let Some(wav) = self.pick(tag) else {
             if !self.warned_missing {
                 self.warned_missing = true;
@@ -328,7 +640,7 @@ impl Sound {
     }
 
     fn spawn(&mut self, wav: &Path, blocking: bool) {
-        let child = Command::new("aplay")
+        let child = Command::new(&self.player)
             .args(["-q", "-D", &self.device])
             .arg(wav)
             .stdin(Stdio::null())
@@ -370,11 +682,14 @@ impl Sound {
             }
             return false;
         };
-        self.stop_child();
+        self.pending_sound = None;
+        if !self.stop_child() {
+            return false;
+        }
 
         // A short ALSA buffer for the same reason as the short lead: this is an instrument,
         // and every millisecond queued here is a millisecond between the hand and the note.
-        let child = Command::new("aplay")
+        let child = Command::new(&self.player)
             .args([
                 "-q",
                 "-D",
@@ -489,7 +804,10 @@ impl Sound {
             }
             return false;
         };
-        self.stop_child();
+        self.pending_sound = None;
+        if !self.stop_child() {
+            return false;
+        }
         let Some(mut stdin) = self.open_synth_pcm() else {
             return false;
         };
@@ -613,7 +931,7 @@ impl Sound {
     /// between a gesture and its sound, whether the gesture is a hand in front of the beak or a
     /// beat heard from another duck.
     fn open_synth_pcm(&mut self) -> Option<std::process::ChildStdin> {
-        let child = Command::new("aplay")
+        let child = Command::new(&self.player)
             .args([
                 "-q",
                 "-D",
@@ -713,12 +1031,17 @@ impl Sound {
         if matches!(self.ride, Ride::Theremin | Ride::Singing) {
             return;
         }
+        if self.speech_active() && hold != WheeeHold::Held {
+            return;
+        }
         match hold {
             // A press during a landing ride supersedes it — `start_wheee` takes the PCM.
             WheeeHold::Held if self.ride != Ride::Riding => self.start_wheee(),
             WheeeHold::Held => {}
             // The client said "released": cut it, as the prototype does.
-            WheeeHold::Released if self.ride != Ride::Off => self.stop_child(),
+            WheeeHold::Released if self.ride != Ride::Off => {
+                self.stop_child();
+            }
             // The hold went stale — the client stopped re-notifying, or stopped existing.
             // Land the ride rather than chopping it: nobody asked for a cut.
             WheeeHold::Decayed if self.ride == Ride::Riding => self.land_ride(),
@@ -740,7 +1063,10 @@ impl Sound {
 
     /// Stream start → loop (while held) → end into one `aplay`, so the loop wraps gap-free.
     fn start_wheee(&mut self) {
-        self.stop_child();
+        self.pending_sound = None;
+        if !self.stop_child() {
+            return;
+        }
         let dir = self.bank.join("wheee");
         let mut letters: Vec<String> = std::fs::read_dir(&dir)
             .map(|rd| {
@@ -773,7 +1099,7 @@ impl Sound {
             self.degraded_wheee();
             return;
         };
-        let child = Command::new("aplay")
+        let child = Command::new(&self.player)
             .args([
                 "-q",
                 "-D",
@@ -874,6 +1200,16 @@ fn wait_bounded(child: &mut Child, timeout: Duration) {
     );
     let _ = child.kill();
     let _ = child.wait();
+}
+
+impl Drop for Sound {
+    fn drop(&mut self) {
+        self.pending_sound = None;
+        self.stop_child();
+        if let Some(mut child) = self.retiring.take() {
+            wait_bounded(&mut child, BLOCKING_PLAY_MAX);
+        }
+    }
 }
 
 /// Read a PCM wav: (sample_rate, raw S16LE payload). A minimal RIFF chunk walk — enough for
@@ -977,5 +1313,165 @@ mod tests {
         assert_eq!(sound.ride, Ride::Off);
         assert!(!sound.wheee_held.load(Ordering::Relaxed));
         std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(all(test, unix))]
+mod speech_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    fn player(body: &str, seconds: f64) -> (tempfile::TempDir, Sound) {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("player");
+        std::fs::write(&script, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut voice = Sound::new(dir.path().to_owned(), "default".into());
+        voice.player = script;
+        let audio = duck_speech::Audio::new(vec![
+            0.12;
+            (seconds * f64::from(duck_speech::SAMPLE_RATE))
+                as usize
+        ])
+        .unwrap();
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        tx.send(Ok(audio)).unwrap();
+        voice.speech = Some(SpeechPlayback {
+            pending: Some(crate::speech::Pending::from_reply(rx)),
+            requested: Instant::now(),
+            started: None,
+            mouth: None,
+            playing: Arc::new(AtomicBool::new(true)),
+            writer: Arc::new(std::sync::atomic::AtomicU8::new(SPEECH_WRITING)),
+            mouth_revision: 7,
+            relinquished: false,
+        });
+        voice.ride = Ride::Speech;
+        (dir, voice)
+    }
+    fn finish(voice: &mut Sound) {
+        let end = Instant::now() + Duration::from_secs(3);
+        while voice.speech_active() || voice.retiring.is_some() || voice.pending_sound.is_some() {
+            voice.poll(Instant::now());
+            assert!(Instant::now() < end);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    #[test]
+    fn speech_keeps_pcm_through_release_chirp_and_coo_and_counts_completion_once() {
+        let (_dir, mut voice) = player("cat >/dev/null", 0.12);
+        voice.advance_speech();
+        let pid = voice.child.as_ref().unwrap().id();
+        voice.wheee(WheeeHold::Released);
+        voice.play("chirp", false);
+        voice.play("coo", false);
+        assert_eq!(voice.child.as_ref().unwrap().id(), pid);
+        assert!(voice.speech_mouth(Instant::now(), 7, true, 0).is_some());
+        assert!(voice.suppress_pet(Instant::now()));
+        finish(&mut voice);
+        assert_eq!(voice.played(), 1);
+        voice.poll(Instant::now());
+        assert_eq!(voice.played(), 1);
+        assert!(voice.suppress_pet(Instant::now()));
+        assert!(!voice.suppress_pet(Instant::now() + Duration::from_secs(3)));
+    }
+    #[test]
+    fn failure_and_premature_success_are_never_counted_as_spoken() {
+        for body in ["exit 7", "exit 0"] {
+            let (_dir, mut voice) = player(body, 1.0);
+            voice.advance_speech();
+            finish(&mut voice);
+            assert_eq!(voice.played(), 0);
+        }
+        let (_dir, mut voice) = player("cat >/dev/null", 0.1);
+        voice.player = PathBuf::from("/nonexistent/speech-test-player");
+        voice.advance_speech();
+        assert!(!voice.speech_active());
+        assert_eq!(voice.played(), 0);
+    }
+    #[test]
+    fn a_real_manual_change_relinquishes_the_entire_utterance() {
+        let (_dir, mut voice) = player("cat >/dev/null", 0.2);
+        voice.advance_speech();
+        assert!(voice.speech_mouth(Instant::now(), 7, true, 0).is_some());
+        assert!(
+            voice.speech_mouth(Instant::now(), 7, true, 0).is_some(),
+            "neutral keepalive stole ownership"
+        );
+        assert!(voice.speech_mouth(Instant::now(), 8, true, 0).is_none());
+        assert!(voice.speech_relinquished());
+        assert!(voice.speech_mouth(Instant::now(), 7, true, 0).is_none());
+        let (_dir, mut voice) = player("cat >/dev/null", 0.1);
+        voice.advance_speech();
+        assert!(voice.speech_mouth(Instant::now(), 7, false, 0).is_none());
+        assert!(
+            voice.speech_mouth(Instant::now(), 7, true, 0).is_none(),
+            "unsafe transition was forgotten"
+        );
+    }
+    #[test]
+    fn higher_priority_owners_cancel_pending_and_playing_speech_without_waiting() {
+        for started in [false, true] {
+            for owner in ["alarm", "wheee", "theremin", "chorale", "shutdown"] {
+                let (dir, mut voice) = player("cat >/dev/null", 1.0);
+                voice.personality = Some(Some(Personality::from_seed(26)));
+                if started {
+                    voice.advance_speech();
+                }
+                match owner {
+                    "alarm" => {
+                        std::fs::create_dir(dir.path().join("alarm")).unwrap();
+                        std::fs::write(dir.path().join("alarm/alarm_a.wav"), b"fixture").unwrap();
+                        voice.play("alarm", false);
+                    }
+                    "wheee" => voice.wheee(WheeeHold::Held),
+                    "theremin" => {
+                        voice.theremin_start();
+                    }
+                    "chorale" => {
+                        voice.sing_start(
+                            &sounds::chorale::Score::wistful(),
+                            sounds::chorale::Part::Soprano,
+                        );
+                    }
+                    _ => voice.cancel_speech(),
+                }
+                assert!(!voice.speech_active(), "{owner} did not revoke speech");
+                assert!(
+                    voice.played() <= u64::from(owner == "alarm"),
+                    "interruption counted a sentence"
+                );
+                if voice.retiring.is_some() {
+                    assert!(
+                        voice.child.is_none(),
+                        "replacement overlapped its predecessor"
+                    );
+                }
+                finish(&mut voice);
+                assert_eq!(voice.played(), u64::from(owner == "alarm"));
+            }
+        }
+    }
+    #[test]
+    fn canceling_a_pending_request_drops_its_reply_slot_and_synthesis_times_out() {
+        let (_dir, mut voice) = player("cat >/dev/null", 0.1);
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        voice.speech.as_mut().unwrap().pending = Some(crate::speech::Pending::from_reply(rx));
+        voice.cancel_speech();
+        assert!(
+            tx.try_send(Ok(duck_speech::Audio::new(vec![0.1; 240]).unwrap()))
+                .is_err()
+        );
+        let (_dir, mut voice) = player("cat >/dev/null", 0.1);
+        voice.poll(Instant::now() + Duration::from_secs(21));
+        assert!(!voice.speech_active());
+        assert_eq!(voice.played(), 0);
+    }
+    #[test]
+    fn dropping_the_player_owner_reaps_its_pcm_child() {
+        let (_dir, mut voice) = player("cat >/dev/null", 2.0);
+        voice.advance_speech();
+        let pid = voice.child.as_ref().unwrap().id();
+        drop(voice);
+        assert_eq!(unsafe { libc::kill(pid as i32, 0) }, -1);
     }
 }

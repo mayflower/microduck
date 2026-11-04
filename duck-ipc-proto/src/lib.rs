@@ -516,7 +516,14 @@ pub const JSONRPC_VERSION: &str = "2.0";
 /// [`code::SESSIONS_CONNECTED`] while one is connected, unless `interrupt_sessions` is set. A request made
 /// over WebRTC by the only peer connected is exempt. `robot.remoteSessionActive` is gone; it was
 /// `updaterd`'s question, refused to every client.
-pub const API_VERSION: u32 = 50;
+///
+/// # v51 — on-device speech
+/// `robot.say` accepts bounded English text, synthesized locally with Paradee Heart.
+/// Install matching daemons, CLI and transports; install the pinned model with `sounds speech install`.
+pub const API_VERSION: u32 = 51;
+
+/// Maximum UTF-8 payload for one on-device speech request.
+pub const MAX_SPEECH_TEXT_BYTES: usize = 512;
 
 /// The observation width every policy this robot family runs is built against.
 ///
@@ -794,6 +801,7 @@ pub mod method {
     /// is diagnostics, not danger), but "accepted" from a robot that cannot make a sound
     /// would make `robotctl quack` lie about which duck answered.
     pub const ROBOT_SOUND: &str = "robot.sound";
+    pub const ROBOT_SAY: &str = "robot.say";
     /// Switch the flashlight — the face's RGB LED — on, off, or over, in a colour. Discrete; send
     /// as a request. Refused, with a reason, by a board without one (the Zero 3W, the simulator).
     pub const ROBOT_FLASHLIGHT: &str = "robot.flashlight";
@@ -1204,6 +1212,8 @@ pub enum Call {
     RobotMouth(MouthParams),
     /// Play a voice-bank sound.
     RobotSound(SoundParams),
+    /// On-device text-to-speech; response is IntentResult, not playback completion.
+    RobotSay(SayParams),
     /// Switch the flashlight. See [`method::ROBOT_FLASHLIGHT`].
     RobotFlashlight(FlashlightParams),
     /// Pick the ToF theremin up or put it down. Discrete; the answer is [`ThereminResult`].
@@ -1409,6 +1419,7 @@ impl Call {
             Call::RobotPose(_) => method::ROBOT_POSE,
             Call::RobotMouth(_) => method::ROBOT_MOUTH,
             Call::RobotSound(_) => method::ROBOT_SOUND,
+            Call::RobotSay(_) => method::ROBOT_SAY,
             Call::RobotFlashlight(_) => method::ROBOT_FLASHLIGHT,
             Call::RobotTheremin(_) => method::ROBOT_THEREMIN,
             Call::RobotChorale(_) => method::ROBOT_CHORALE,
@@ -1631,6 +1642,7 @@ impl Call {
             | Call::RobotPose(_)
             | Call::RobotMouth(_)
             | Call::RobotSound(_)
+            | Call::RobotSay(_)
             | Call::RobotFlashlight(_)
             | Call::RobotTheremin(_)
             | Call::RobotChorale(_)
@@ -1752,6 +1764,7 @@ impl Call {
             Call::OsSwitch(p) => encode(p),
             Call::TelemetrySet(p) => encode(p),
             Call::RobotSound(p) => encode(p),
+            Call::RobotSay(p) => encode(p),
             Call::RobotFlashlight(p) => encode(p),
             Call::RobotVetbookNote(p) => encode(p),
             Call::RobotVetbookTally(p) => encode(p),
@@ -1849,6 +1862,7 @@ impl Call {
             method::ROBOT_POSE => Call::RobotPose(decode(params)?),
             method::ROBOT_MOUTH => Call::RobotMouth(decode(params)?),
             method::ROBOT_SOUND => Call::RobotSound(decode(params)?),
+            method::ROBOT_SAY => Call::RobotSay(decode(params)?),
             method::ROBOT_FLASHLIGHT => Call::RobotFlashlight(decode(params)?),
             method::ROBOT_THEREMIN => Call::RobotTheremin(decode(params)?),
             method::ROBOT_CHORALE => Call::RobotChorale(decode(params)?),
@@ -2032,6 +2046,9 @@ pub mod test_support {
                 active: true,
             }),
             Call::RobotMouth(MouthParams { open: 0.5 }),
+            Call::RobotSay(SayParams {
+                text: "Hello, human.".into(),
+            }),
             Call::RobotSound(SoundParams {
                 tag: SoundTag::Chirp,
                 hold: None,
@@ -2514,6 +2531,13 @@ impl SoundTag {
             SoundTag::Wheee => "wheee",
         }
     }
+}
+
+/// English text, synthesized on the robot. See [`method::ROBOT_SAY`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SayParams {
+    pub text: String,
 }
 
 /// See [`method::ROBOT_SOUND`].
@@ -6246,7 +6270,7 @@ mod tests {
     fn every_call_covers_every_variant() {
         assert_eq!(
             every_call().len(),
-            78,
+            79,
             "a Call variant was added or removed — update every_call() and this count"
         );
     }

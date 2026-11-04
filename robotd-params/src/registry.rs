@@ -619,6 +619,21 @@ pub const REGISTRY: &[Entry] = &[
         Kind::Text,
         "Your own emotions, on top of the shipped set: <name>.json + <name>.wav",
     ),
+    feature(
+        "speech.enabled",
+        Kind::Bool,
+        "Speak text locally with the Heart voice",
+    ),
+    entry(
+        "speech.model",
+        Kind::Text,
+        "Pinned Paradee v1.2 model installed by sounds speech install",
+    ),
+    entry(
+        "speech.mouth_offset_ms",
+        Kind::Integer,
+        "Beak timing correction, -250..250 ms; positive delays",
+    ),
     // ── [media] ──────────────────────────────────────────────────────────────
     feature(
         "media.source",
@@ -1345,6 +1360,7 @@ mod tests {
                 "audio.enabled",
                 "audio.greet",
                 "audio.pet_detect",
+                "speech.enabled",
                 "media.source",
                 "media.quality",
                 // The six one-shot buttons. Front-page keys because "what does this button do"

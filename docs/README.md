@@ -42,6 +42,7 @@ own the mechanism is the bug.
 | | |
 |---|---|
 | [`architecture.md`](design/architecture.md) | The service split, the IPC contract, state ownership, safety and authority. |
+| [`speech.md`](design/speech.md) | On-device Heart text-to-speech, model installation, audio and beak ownership. |
 | [`robotd-design.md`](design/robotd-design.md) | The control loop: the Dynamixel bus and who owns the port, the model, sensing, observations, policy, safety — and what else hangs off the tick. |
 | [`updater-design.md`](design/updater-design.md) | The update engine: verification, atomic swap, health gate, rollback, release format. |
 | [`policy-channel-design.md`](design/policy-channel-design.md) | Where the ONNX policies come from: the `policies` component, trying someone else's, and what `reset` puts back. |

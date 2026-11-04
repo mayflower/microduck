@@ -64,7 +64,7 @@ fn permits(call: &proto::Call) -> bool {
         RobotMove(_) | RobotHead(_) | RobotLook(_) | RobotPose(_) | RobotMouth(_) => true,
         // The theremin rides with the sounds: it is one, and a browser that can quack a duck
         // may pick its instrument up too.
-        RobotDo(_) | RobotSound(_) | RobotTheremin(_) => true,
+        RobotDo(_) | RobotSound(_) | RobotSay(_) | RobotTheremin(_) => true,
         // Somebody watching through the camera is who wants the room lit.
         RobotFlashlight(_) => true,
 

@@ -30,6 +30,7 @@ mod pickup;
 mod posture;
 mod soc;
 mod sound;
+mod speech;
 mod theremin;
 mod vetbook;
 
@@ -618,6 +619,9 @@ fn drop_unloadable_overrides_with(
 }
 
 struct RobotState {
+    speech_enabled: bool,
+    speech_ready: AtomicBool,
+    speech_available: AtomicBool,
     /// Epoch for every timestamp below. `Instant` so the clock cannot go backwards.
     started: Instant,
     ticks: AtomicU64,
@@ -814,6 +818,9 @@ impl RobotState {
         force_busy: bool,
     ) -> Self {
         Self {
+            speech_enabled: params.audio.enabled && params.speech.enabled,
+            speech_ready: AtomicBool::new(false),
+            speech_available: AtomicBool::new(false),
             started: Instant::now(),
             ticks: AtomicU64::new(0),
             missed: AtomicU64::new(0),
@@ -2452,6 +2459,11 @@ async fn control_loop<T: RobotIo>(
         .audio
         .enabled
         .then(|| sound::Sound::new(params.audio.bank.clone(), audio.playback.clone()));
+    if params.speech.enabled
+        && let Some(voice) = voice.as_mut()
+    {
+        voice.enable_speech(params.speech.model.clone());
+    }
     let pet: Option<pet_detect::worker::PetHandle> = if params.audio.enabled
         && params.audio.pet_detect_resolved(params.policy.mode)
         && let Some(model) = params.audio.pet_model_resolved()
@@ -2557,6 +2569,9 @@ async fn control_loop<T: RobotIo>(
     while !state.shutdown.load(Ordering::Relaxed) {
         ticker.tick().await;
         let tick_start = Instant::now();
+        if let Some(voice) = voice.as_mut() {
+            voice.poll(tick_start);
+        }
 
         let read_at = proto::clock::monotonic_ns();
         let fresh = match safety.read() {
@@ -2647,7 +2662,8 @@ async fn control_loop<T: RobotIo>(
         // Before the enable-driven bring-up below, so a `relax` that arrives in the same tick as a
         // still-set `enabled` flag wins — `request_relax` clears that flag, and reading the request
         // first means the order cannot invert.
-        match intents.take_power_request() {
+        let power_request = intents.take_power_request();
+        match power_request {
             // The power-off has been asked for and torque is off. Standing the robot up now would
             // hand the poweroff a robot mid-ramp, stiff, which is the outcome the sit exists to
             // avoid.
@@ -2871,6 +2887,9 @@ async fn control_loop<T: RobotIo>(
                 while let Some(ev) = pet.try_recv_event() {
                     match ev {
                         pet_detect::PettingEvent::Start => {
+                            if voice.suppress_pet(tick_start) {
+                                continue;
+                            }
                             vettally.pet();
                             let calm =
                                 !safety.fallen() && controller.as_ref().is_none_or(|c| !c.busy());
@@ -3156,6 +3175,7 @@ async fn control_loop<T: RobotIo>(
                 tracing::warn!(battery_empty, "shutdown: sitting down before power off");
                 // Goodbye peck; non-blocking — it plays out during the sit.
                 if let Some(voice) = voice.as_mut() {
+                    voice.cancel_speech();
                     voice.play("peck", false);
                 }
                 controller
@@ -4061,12 +4081,84 @@ async fn control_loop<T: RobotIo>(
             }
         }
 
+        // Speech audio is admitted only after current safety and instrument decisions.
+        let conditions = speech::Conditions {
+            fallen: safety.fallen(),
+            limp_fall: in_limp_fall,
+            shutdown: powered_off || shutdown || shutdown_sit.is_some(),
+            rest: rest || shutdown_rest.is_some(),
+            relax: matches!(power_request, Some(intents::PowerRequest::Relax)),
+            enabled: snapshot.enabled,
+            ready: bringup == Bringup::Ready,
+            fresh: fresh.is_some(),
+            imu_ready: safety.imu_ready(),
+            skill_busy: controller.as_ref().is_some_and(|c| c.busy()),
+            instrument_busy: theremin.as_ref().is_some_and(|t| t.active())
+                || chorale.as_ref().is_some_and(|c| c.active()),
+            transitioning: pending_swap.is_some() || mode_change.is_some(),
+        };
+        let requested_speech = intents.take_say();
+        let mut speech_open = None;
+        let mut speech_override = None;
+        if let Some(voice) = voice.as_mut() {
+            if !conditions.audio_allowed() || conditions.instrument_busy {
+                voice.cancel_speech();
+            }
+            if let Some(text) = requested_speech {
+                if conditions.audio_allowed() && !conditions.instrument_busy {
+                    if let Err(reason) = voice.say(
+                        text,
+                        tick_start,
+                        snapshot.mouth_revision,
+                        snapshot.mouth,
+                        conditions.mouth_allowed(),
+                    ) {
+                        tracing::info!(reason, "speech intent refused by control loop");
+                    }
+                } else {
+                    tracing::info!("speech intent refused: unsafe state or instrument active");
+                }
+            }
+            if conditions.audio_allowed() && !conditions.instrument_busy {
+                voice.advance_speech();
+            }
+            speech_open = voice.speech_mouth(
+                tick_start,
+                snapshot.mouth_revision,
+                conditions.mouth_allowed(),
+                params.speech.mouth_offset_ms,
+            );
+            let manual_during_speech = conditions.mouth_allowed() && voice.speech_relinquished();
+            speech_override =
+                speech_open.or_else(|| manual_during_speech.then_some(snapshot.mouth));
+            if manual_during_speech && !driving {
+                hold[duck_control::model::MOUTH_INDEX] =
+                    duck_control::model::mouth_target(snapshot.mouth);
+            }
+            state
+                .speech_ready
+                .store(voice.speech_ready(), Ordering::Release);
+            state.speech_available.store(
+                voice.speech_available()
+                    && conditions.audio_allowed()
+                    && !conditions.instrument_busy,
+                Ordering::Release,
+            );
+        }
+        if let Some(open) = speech_override {
+            targets[duck_control::model::MOUTH_INDEX] = duck_control::model::mouth_target(open);
+        }
+
         // The mouth is not part of any policy; the intent, and the idle yawn, are what move it.
         // Only while driving — a held or homing robot keeps whatever its hold pose says, so
         // a restart cannot snap a mouth.
         // An idle yawn opens it further than a client asked, never less: the yawn only runs
         // while nothing asks the robot to move, and a client holding the beak open keeps it so.
-        if driving && theremin_state.is_none() && chorale_state.is_none() {
+        if driving
+            && theremin_state.is_none()
+            && chorale_state.is_none()
+            && speech_override.is_none()
+        {
             targets[duck_control::model::MOUTH_INDEX] =
                 duck_control::model::mouth_target(snapshot.mouth.max(idle.mouth));
         }
@@ -4097,7 +4189,10 @@ async fn control_loop<T: RobotIo>(
             overran: tick_start.elapsed() > period,
             flashlight: state.flashlight.load(Ordering::Relaxed) != 0,
             // What a client asked the beak to do, or the chorale singing through it.
-            mouth: snapshot.mouth.max(chorale_mouth),
+            mouth: snapshot
+                .mouth
+                .max(chorale_mouth)
+                .max(speech_open.unwrap_or(0.0)),
             sounds_played: voice.as_ref().map(|v| v.played()),
         });
 
@@ -5514,6 +5609,25 @@ fn dispatch(
             proto::Response::ok(Some(id), &result)
         }
 
+        proto::Call::RobotSay(p) => {
+            let reason = if !state.speech_enabled {
+                Some("disabled".to_owned())
+            } else if let Err(error) = duck_speech::validate_text(&p.text) {
+                Some(format!("invalid_text: {error}"))
+            } else if !state.speech_ready.load(Ordering::Acquire) {
+                Some("speech_not_ready: install the model with sounds speech install and restart robotd; inspect the journal if it stays unavailable".into())
+            } else if !state.speech_available.load(Ordering::Acquire) {
+                Some("audio_busy_or_unsafe".into())
+            } else if !intents.request_say(p.text.clone()) {
+                Some("request_pending".into())
+            } else {
+                None
+            };
+            let result =
+                reason.map_or_else(proto::IntentResult::accepted, proto::IntentResult::refused);
+            proto::Response::ok(Some(id), &result)
+        }
+
         // The task that owns the LED switches it; this only records what was asked and wakes it.
         proto::Call::RobotFlashlight(p) => {
             let result = if state.has_flashlight {
@@ -6582,6 +6696,45 @@ mod tests {
         assert!(!refused.accepted);
         let reason = refused.reason.expect("a refusal says why");
         assert!(reason.contains("tofd"), "{reason}");
+    }
+
+    #[test]
+    fn say_admission_reports_disabled_unready_busy_invalid_text_and_pending() {
+        let mut s = state();
+        let intents = Intents::new();
+        let ask = |s: &RobotState, text: &str| -> proto::IntentResult {
+            let r = dispatch(
+                s,
+                &intents,
+                proto::Id::Number(1),
+                &proto::Call::RobotSay(proto::SayParams { text: text.into() }),
+            );
+            serde_json::from_value(r.result.unwrap()).unwrap()
+        };
+        assert_eq!(ask(&s, "Hello").reason.as_deref(), Some("disabled"));
+        s.speech_enabled = true;
+        assert!(
+            ask(&s, "Hello")
+                .reason
+                .unwrap()
+                .starts_with("speech_not_ready")
+        );
+        assert!(ask(&s, "").reason.unwrap().starts_with("invalid_text"));
+        assert!(
+            ask(&s, &"x".repeat(513))
+                .reason
+                .unwrap()
+                .starts_with("invalid_text")
+        );
+        s.speech_ready.store(true, Ordering::Release);
+        assert_eq!(
+            ask(&s, "Hello").reason.as_deref(),
+            Some("audio_busy_or_unsafe")
+        );
+        s.speech_available.store(true, Ordering::Release);
+        assert!(ask(&s, "Hello").accepted);
+        assert_eq!(ask(&s, "Other").reason.as_deref(), Some("request_pending"));
+        assert_eq!(intents.take_say().as_deref(), Some("Hello"));
     }
 
     fn state() -> RobotState {

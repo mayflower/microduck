@@ -81,6 +81,13 @@ if [ -x bin/sounds ]; then
         || echo "postinstall: could not render the voice bank; the robot stays quiet" >&2
 fi
 
+# The optional on-device speech model. The same binary pins and verifies it; when speech
+# is disabled this does no network work. Failure leaves the robot moving and speech unavailable.
+if [ -x bin/sounds ]; then
+    bin/sounds speech install --if-enabled /etc/robot/robotd.toml \
+        || echo "postinstall: speech model unavailable; inspect the sounds installer output" >&2
+fi
+
 # The official policy set. `robotd` reads its policies from /opt/robot/policies/current rather
 # than from inside this release, so a gait retrain does not need a daemon release; until something
 # publishes a policy bundle, the release is what fills that directory. The script explains the one

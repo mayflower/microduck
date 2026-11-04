@@ -12,7 +12,7 @@
 //! Every slot is stamped, because the loop's real question is never "what is the value" but
 //! "how old is it". That is what the deadman reads.
 
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// "No mode switch pending" in [`Intents::mode_switch`].
@@ -147,6 +147,8 @@ pub struct Intents {
     /// Mouth opening, 0..1, as `f64::to_bits`. Continuous like the twist, unstamped like
     /// the pose — a mouth left open by a dead client is exactly what the prototype does.
     mouth: std::sync::atomic::AtomicU64,
+    mouth_revision: AtomicU64,
+    say: ArcSwapOption<String>,
     /// Whether the policy should drive. Discrete, so a plain flag rather than a slot.
     enabled: AtomicBool,
     /// A pending `robot.init` / `robot.relax`, as [`PowerRequest`].
@@ -259,6 +261,7 @@ pub struct Snapshot {
     pub pose: PoseIntent,
     /// Mouth opening, 0..1.
     pub mouth: f64,
+    pub mouth_revision: u64,
 }
 
 impl Default for Intents {
@@ -285,6 +288,8 @@ impl Intents {
             }),
             pose: ArcSwap::from_pointee(PoseIntent::default()),
             mouth: std::sync::atomic::AtomicU64::new(0.0f64.to_bits()),
+            mouth_revision: AtomicU64::new(0),
+            say: ArcSwapOption::empty(),
             enabled: AtomicBool::new(false),
             power: AtomicU8::new(POWER_NONE),
             theremin: AtomicU8::new(THEREMIN_NONE),
@@ -334,8 +339,20 @@ impl Intents {
     }
 
     pub fn set_mouth(&self, open: f64) {
-        self.mouth
-            .store(open.to_bits(), std::sync::atomic::Ordering::Relaxed);
+        let old = self.mouth.swap(open.to_bits(), Ordering::Relaxed);
+        if f64::from_bits(old) != open {
+            self.mouth_revision.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// One bounded request slot; no utterance waits behind another.
+    pub fn request_say(&self, text: String) -> bool {
+        self.say
+            .compare_and_swap(&None::<Arc<String>>, Some(Arc::new(text)))
+            .is_none()
+    }
+    pub fn take_say(&self) -> Option<String> {
+        self.say.swap(None).map(Arc::unwrap_or_clone)
     }
 
     /// Queue the ground pick, which is not one of the configurable one-shots.
@@ -625,12 +642,29 @@ impl Intents {
             enabled: self.enabled.load(Ordering::Relaxed),
             pose,
             mouth: f64::from_bits(self.mouth.load(std::sync::atomic::Ordering::Relaxed)),
+            mouth_revision: self.mouth_revision.load(Ordering::Relaxed),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn say_has_one_slot_and_identical_neutral_mouth_commands_do_not_take_ownership() {
+        let intents = super::Intents::new();
+        assert!(intents.request_say("first".into()));
+        assert!(!intents.request_say("second".into()));
+        assert_eq!(intents.take_say().as_deref(), Some("first"));
+        assert!(intents.take_say().is_none());
+        intents.set_mouth(0.0);
+        intents.set_mouth(-0.0);
+        assert_eq!(intents.snapshot().mouth_revision, 0);
+        intents.set_mouth(0.7);
+        intents.set_mouth(0.7);
+        assert_eq!(intents.snapshot().mouth_revision, 1);
+        intents.set_mouth(0.0);
+        assert_eq!(intents.snapshot().mouth_revision, 2);
+    }
     use super::*;
 
     /// The hold's three states, which the ride's two different exits depend on. A `false`

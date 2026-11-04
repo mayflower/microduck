@@ -6,6 +6,7 @@ license.workspace = true
 description = "Robot control daemon — skeleton"
 
 [dependencies]
+anyhow = "1"
 duck-ipc-proto = { path = "../duck-ipc-proto" }
 duck-control = { path = "../duck-control" }
 robotd-params = { path = "../robotd-params" }
@@ -16,6 +17,7 @@ pet-detect = { path = "../pet-detect" }
 # sound whose whole shape is known in advance; a theremin's pitch is a hand's distance and
 # is not, so `robotd` renders that one itself. Pure Rust, no vendored anything.
 sounds = { path = "../sounds" }
+duck-speech = { path = "../duck-speech" }
 clap = { workspace = true, features = ["derive"] }
 serde.workspace = true
 serde_json.workspace = true

@@ -176,6 +176,12 @@ enum Namespace {
     /// is generated from its SoC serial, so the one that answers — in a voice that is only
     /// its own — is the one you're SSH'd into.
     Quack,
+    /// Synthesize English text locally with the Heart voice; acknowledgement is intent acceptance.
+    Say {
+        text: String,
+        #[arg(long)]
+        json: bool,
+    },
 
     /// The duck's vet book: its whole life in numbers.
     ///
@@ -5426,6 +5432,29 @@ fn run(cli: Cli) -> Result<(), Failure> {
         }
         Namespace::Endurance { command, args } => {
             return endurance::run(&cli.robot_socket, command, args);
+        }
+        Namespace::Say { text, json } => {
+            let mut client = Client::connect_to("robotd", &cli.robot_socket)?;
+            client.hello()?;
+            let result =
+                result_of(client.call(&proto::Call::RobotSay(proto::SayParams { text }))?)?;
+            let outcome: proto::IntentResult = decode(&result)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string(&outcome).expect("intent serializes")
+                );
+            }
+            if !outcome.accepted {
+                return Err(Failure::new(
+                    exit::REFUSED,
+                    outcome.reason.unwrap_or_else(|| "refused".into()),
+                ));
+            }
+            if !json {
+                println!("Speech intent accepted; synthesis and playback run on the robot.");
+            }
+            return Ok(());
         }
         Namespace::Quack => {
             return run_quack(&cli.robot_socket);

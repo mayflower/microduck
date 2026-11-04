@@ -561,6 +561,13 @@ mode = "walk"
 # yawn_open = 0.6
 # yawn_pitch = -0.15
 
+# Local text-to-speech. First run `sounds speech install`, then enable and restart robotd.
+# Speech uses Paradee v1.2's approved Heart voice. See docs/design/speech.md.
+[speech]
+# enabled = false
+# model = "/var/lib/robot/speech/paradee-v1.2-int8.onnx"
+# mouth_offset_ms = 0
+
 [media]
 # What mediad streams: the camera, and at what quality. Read by mediad at startup, so a change
 # here needs `systemctl restart mediad` — not robotd. `robotctl configure` offers the right one.

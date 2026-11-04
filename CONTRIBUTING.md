@@ -5,7 +5,7 @@ For working on the daemons themselves. To use a robot rather than change it, see
 
 ## Building and testing
 
-Needs Rust **1.89+** (stable). The robot is aarch64 Linux; you develop on Linux or macOS, and
+Needs Rust **1.92+** (stable). The robot is aarch64 Linux; you develop on Linux or macOS, and
 the two are not quite the same checkout — see below.
 
 That number is a ceiling too. The Yocto image (`microduck_yocto`) builds each release from
@@ -91,6 +91,7 @@ the libraries they drive — no sockets, no systemd, nothing starts them
   kinematics/     the MJCF model and forward kinematics; head and hand chains
   odometry/       where the robot has been, from foot contacts and the IMU
   sounds/         synthesis, per-robot voice personality, the chorale's score
+  duck-speech/    native English text-to-speech with Paradee Heart
   pet-detect/     a small CNN that hears head scratches on the onboard mic
   robotd-params/  robotd's startup parameters: schema, defaults, validation
 

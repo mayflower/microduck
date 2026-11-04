@@ -290,7 +290,7 @@ fn permits(call: &proto::Call) -> bool {
         // every voice is seeded from the SoC serial, so the robot that answers in its own voice
         // is the one this link reached. `duckctl quack` is the client that wanted it — the
         // radio's version of `robotctl quack`. One request, not a stream, and it moves nothing.
-        RobotSound(_) => true,
+        RobotSound(_) | RobotSay(_) => true,
 
         // Harmless and rather charming from a phone — but they ride the same refusal as the
         // rest of robot.* until the app path exists to want them: opening a call to the radio

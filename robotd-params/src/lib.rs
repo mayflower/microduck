@@ -197,6 +197,7 @@ pub struct Params {
     pub safety: SafetyParams,
     pub audio: AudioParams,
     pub emotions: EmotionsParams,
+    pub speech: SpeechParams,
     pub theremin: ThereminParams,
     pub pickup: PickupParams,
     pub head_imu: HeadImuParams,
@@ -1391,6 +1392,24 @@ mod head_imu_tests {
         assert_eq!(HeadImuParams::reader(Board::Zero3), "tofd");
         assert_eq!(HeadImuParams::reader(Board::Beta), "robotd");
         assert_eq!(HeadImuParams::reader(Board::FaceBoardV1), "robotd");
+    }
+}
+
+/// Optional on-device text-to-speech. Settings take effect after a robotd restart.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SpeechParams {
+    pub enabled: bool,
+    pub model: PathBuf,
+    pub mouth_offset_ms: i32,
+}
+impl Default for SpeechParams {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model: PathBuf::from("/var/lib/robot/speech/paradee-v1.2-int8.onnx"),
+            mouth_offset_ms: 0,
+        }
     }
 }
 
@@ -2728,6 +2747,8 @@ impl UpdateGate {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ParamsError {
+    #[error("{path}: speech.mouth_offset_ms must be in -250..250")]
+    SpeechOffset { path: String },
     #[error("reading {path}: {source}")]
     Read {
         path: String,
@@ -2950,6 +2971,11 @@ impl Params {
     /// Reject values that would produce a loop that cannot work, at startup rather than as
     /// a division by zero three seconds later.
     fn validate(&self, path: &Path) -> Result<(), ParamsError> {
+        if !(-250..=250).contains(&self.speech.mouth_offset_ms) {
+            return Err(ParamsError::SpeechOffset {
+                path: path.display().to_string(),
+            });
+        }
         if self.control.hz == 0 || self.control.hz > 1000 {
             return Err(ParamsError::Rate {
                 path: path.display().to_string(),
@@ -3227,6 +3253,24 @@ pub fn alsa_card_ids(proc_asound_cards: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn speech_is_opt_in_and_beak_timing_cannot_escape_its_calibration_range() {
+        let mut params = super::Params::default();
+        assert!(!params.speech.enabled);
+        assert_eq!(params.speech.mouth_offset_ms, 0);
+        for offset in [-250, 0, 250] {
+            params.speech.mouth_offset_ms = offset;
+            assert!(params.validate(std::path::Path::new("test.toml")).is_ok());
+        }
+        for offset in [-251, 251] {
+            params.speech.mouth_offset_ms = offset;
+            assert!(matches!(
+                params.validate(std::path::Path::new("test.toml")),
+                Err(super::ParamsError::SpeechOffset { .. })
+            ));
+        }
+    }
+
     /// [`Slot::as_str`] must be the *serde key*, because `robotctl policy load` writes
     /// `policy.<slot>` into `robotd.toml` with it. A display name that merely reads well —
     /// `sit_stand`, `groundPick` — would write a key `Params` then ignores as unknown, and the

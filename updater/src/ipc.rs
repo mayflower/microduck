@@ -879,6 +879,7 @@ impl Server {
             | Call::RobotRest
             | Call::RobotDo(_)
             | Call::RobotSound(_)
+            | Call::RobotSay(_)
             | Call::RobotFlashlight(_)
             | Call::RobotPose(_)
             | Call::RobotMouth(_)

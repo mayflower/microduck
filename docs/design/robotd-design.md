@@ -1025,7 +1025,7 @@ intents the loop already arbitrates.
 
 | in the process | what it is | where the reasoning lives |
 |---|---|---|
-| `sound.rs` | the voice at play time — one `aplay` child, and a new sound kills the old one, because the codec's PCM is exclusive | the module header |
+| `sound.rs`, `speech.rs` | the exclusive player and background on-device speech worker | [speech.md](speech.md) owns speech, cancellation, player priorities and beak timing |
 | `theremin.rs` | depth from `tofd` at 15 Hz → a note, a mouth opening, and a line of state, sampled by the 50 Hz loop and never waited on | the module header |
 | `chorale.rs` | several ducks singing one piece: the lowest id conducts, the conductor owns the seating, `btd` carries the beacons and does no thinking | the module header |
 | `emotion.rs` | an emotion = keyframes and a wav, shipped in the release with `[emotions] dir` on top, played by `robot.do <name>` through the same head, pose and mouth commands a client sends | the module header |

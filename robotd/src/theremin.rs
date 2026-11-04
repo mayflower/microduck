@@ -123,8 +123,7 @@ impl Theremin {
         }
     }
 
-    #[cfg(test)]
-    fn active(&self) -> bool {
+    pub fn active(&self) -> bool {
         self.active
     }
 

@@ -64,6 +64,7 @@ recipe, and the export to ONNX that this repo loads.
 </table>
 
 It also sits, kicks a ball, rolls forward on command, and quacks in a voice that is its own.
+Optional [on-device speech](demos/speech/README.md) speaks requested English text with Heart.
 
 ## Where to find things
 
