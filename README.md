@@ -61,6 +61,14 @@ recipe, and the export to ONNX that this repo loads.
 <td><b>It picks things up.</b> Beak to the floor, one button.</td>
 <td><b>It gets back up.</b> Knock it over and it stands itself up.</td>
 </tr>
+<tr>
+<td colspan="2">
+  <video src="https://github.com/user-attachments/assets/c73da840-4385-4b5e-a450-1708f8691c18" controls width="100%"></video>
+</td>
+</tr>
+<tr>
+<td colspan="2"><b>It speaks.</b> Native Heart speech and a synchronized beak in MuJoCo. <a href="demos/speech/README.md">Try on-device speech.</a></td>
+</tr>
 </table>
 
 It also sits, kicks a ball, rolls forward on command, and quacks in a voice that is its own.
