@@ -127,6 +127,11 @@ struct Cli {
 /// `robotctl motors` later is additive rather than a restructure.
 #[derive(Subcommand, Debug)]
 enum Namespace {
+    /// Autonomous music dancing: on, off, status.
+    Dance {
+        #[arg(value_parser=["on","off","status"],default_value="status")]
+        action: String,
+    },
     /// Save one fresh raw UYVY frame; geometry is printed to stderr.
     Frame {
         #[arg(long, default_value = "frame.uyvy")]
@@ -5344,6 +5349,50 @@ fn resolve_from_dir(dir: &std::path::Path) -> Result<String, Failure> {
 
 fn run(cli: Cli) -> Result<(), Failure> {
     let command = match cli.namespace {
+        Namespace::Dance { action } => {
+            let mut client = Client::connect_to("robotd", &cli.robot_socket)?;
+            client.hello()?;
+            let call = match action.as_str() {
+                "on" | "off" => proto::Call::RobotDanceSet(proto::DanceSetParams {
+                    enabled: action == "on",
+                }),
+                _ => proto::Call::RobotDance,
+            };
+            let response = client.call(&call)?;
+            if let Some(error) = response.error {
+                return Err(Failure::new(exit::FAILED, error.message));
+            }
+            if action != "status" {
+                let result: proto::IntentResult = response
+                    .result_as()
+                    .map_err(|e| Failure::new(exit::FAILED, e.to_string()))?;
+                if !result.accepted {
+                    return Err(Failure::new(
+                        exit::FAILED,
+                        result
+                            .reason
+                            .unwrap_or_else(|| "dance setting refused".into()),
+                    ));
+                }
+            }
+            let response = if action == "status" {
+                response
+            } else {
+                client.call(&proto::Call::RobotDance)?
+            };
+            if let Some(error) = response.error {
+                return Err(Failure::new(exit::FAILED, error.message));
+            }
+            let status: proto::DanceStatus = response
+                .result_as()
+                .map_err(|e| Failure::new(exit::FAILED, e.to_string()))?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&status)
+                    .map_err(|e| Failure::new(exit::FAILED, e.to_string()))?
+            );
+            return Ok(());
+        }
         Namespace::Frame { output } => return frame::run(&cli.media_socket, &output),
         Namespace::Health { json, check } => {
             return run_health(

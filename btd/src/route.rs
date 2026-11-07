@@ -79,6 +79,9 @@ fn permits(call: &proto::Call) -> bool {
         // The version handshake. Must be reachable or no client can establish anything.
         Hello(_) => true,
 
+        // Persistent idle behavior is an owner setting. Motor control stays separate.
+        RobotDance | RobotDanceSet(_) => true,
+
         // Answered by `btd` itself rather than forwarded. Permitted because it is the one call a
         // session must be able to make before it has made any other.
         SystemAuthenticate(_) => true,
@@ -645,6 +648,8 @@ mod tests {
                 // alternative is an ssh session, which is not a thing an owner has.
                 proto::method::PAD_PAIR,
                 proto::method::PAD_FORGET,
+                // Persistent autonomous behavior is an owner setting, like pairing.
+                proto::method::ROBOT_DANCE_SET,
             ]
         );
     }

@@ -3553,10 +3553,14 @@ name = "pet-detect"
 version = "0.18.8"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "clap",
  "hound",
+ "libc",
  "ort",
  "rustfft",
+ "serde_json",
+ "tempfile",
  "tracing",
 ]
 

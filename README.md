@@ -61,6 +61,14 @@ recipe, and the export to ONNX that this repo loads.
 <td><b>It picks things up.</b> Beak to the floor, one button.</td>
 <td><b>It gets back up.</b> Knock it over and it stands itself up.</td>
 </tr>
+<tr>
+<td colspan="2">
+  <video src="https://github.com/user-attachments/assets/79454828-8846-43da-bd04-e11e17808aff" controls width="100%"></video>
+</td>
+</tr>
+<tr>
+<td colspan="2"><b>It dances.</b> Steps to music in MuJoCo. <a href="demos/music-dance/README.md">Try the demo.</a></td>
+</tr>
 </table>
 
 It also sits, kicks a ball, rolls forward on command, and quacks in a voice that is its own.

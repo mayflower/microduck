@@ -67,6 +67,7 @@ pub struct Odometry {
     anchor_xy: [f64; 2],
     position: [f64; 3],
     yaw: f64,
+    clearance: [f64; 2],
     /// A corner bidding to become the anchor: (foot, local point, world X/Y).
     pending: Option<(usize, [f64; 3], [f64; 2])>,
     pending_ticks: u32,
@@ -94,6 +95,7 @@ impl Odometry {
             anchor_xy: [0.0; 2],
             position: [0.0; 3],
             yaw: 0.0,
+            clearance: [0.0; 2],
             pending: None,
             pending_ticks: 0,
             needs_init: true,
@@ -134,6 +136,18 @@ impl Odometry {
             self.model.site_pose(self.feet[LEFT], &self.angles),
             self.model.site_pose(self.feet[RIGHT], &self.angles),
         ];
+
+        // Relative sole clearance is independent of trunk height and anchor
+        // drift: it only needs the already-computed FK and measured orientation.
+        let lowest: [f64; 2] = std::array::from_fn(|foot| {
+            self.anchors
+                .foot(foot)
+                .iter()
+                .map(|&corner| rot.rotate(feet[foot].transform_point(corner))[2])
+                .fold(f64::INFINITY, f64::min)
+        });
+        let floor = lowest[0].min(lowest[1]);
+        self.clearance = lowest.map(|z| z - floor);
 
         if self.needs_init {
             let anchor_world = rot.rotate(feet[self.anchor_foot].pos);
@@ -178,6 +192,12 @@ impl Odometry {
     /// plane the anchor defines.
     pub fn position(&self) -> [f64; 3] {
         self.position
+    }
+
+    /// Estimated sole clearance relative to the lower foot on a flat floor.
+    /// This is kinematic feedback, not a force/contact sensor.
+    pub fn foot_clearance(&self) -> [f64; 2] {
+        self.clearance
     }
 
     /// Trunk heading, radians, in the IMU's boot-relative world frame.
@@ -247,6 +267,20 @@ mod tests {
     /// The generated alpha sets must be sole points: inside the sole's
     /// footprint in the site frame and within its thickness, with the right
     /// foot the mirror image of the left.
+    #[test]
+    fn relative_sole_clearance_ignores_heading_and_has_a_grounded_foot() {
+        let mut odo = Odometry::alpha();
+        let mut joints = [0.0; JOINT_NAMES.len()];
+        joints[3] = 0.7;
+        odo.update(&joints, yaw_quat(0.0));
+        let initial = odo.foot_clearance();
+        assert_eq!(initial[0].min(initial[1]), 0.0);
+        assert!(initial[0].max(initial[1]) > 0.005);
+        odo.update(&joints, yaw_quat(1.4));
+        for (a, b) in initial.into_iter().zip(odo.foot_clearance()) {
+            assert!((a - b).abs() < 1e-10);
+        }
+    }
     #[test]
     fn alpha_anchor_sets_lie_on_the_sole() {
         for set in [&ALPHA4, &ALPHA16] {

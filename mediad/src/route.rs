@@ -55,6 +55,9 @@ fn permits(call: &proto::Call) -> bool {
         // The version handshake. Must be reachable or no client can establish anything.
         Hello(_) => true,
 
+        // Persistent idle behavior is an owner setting. Motor control stays separate.
+        RobotDance | RobotDanceSet(_) => true,
+
         // ── the robot, which is what this transport is for ───────────────────
         //
         // Every one of these is refused over BLE on capacity grounds — "a 20-byte notification
@@ -459,6 +462,8 @@ mod tests {
                 // fifteen-second window, which a remote peer cannot satisfy — but unbonding one
                 // is a thing you do *because* the pad is not there.
                 proto::method::PAD_FORGET,
+                // The watching peer may opt into or disable the idle behavior.
+                proto::method::ROBOT_DANCE_SET,
             ],
             "a mutating call was routed to WebRTC; is `deploy/updater.toml` still narrow enough?"
         );

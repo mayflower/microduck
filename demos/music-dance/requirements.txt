@@ -1,0 +1,5 @@
+# CPU-only dependencies for the MuJoCo body and rhythm scoring; no RL training stack.
+mujoco==3.10.0
+numpy==2.4.1
+onnxruntime==1.24.4
+scipy==1.18.0

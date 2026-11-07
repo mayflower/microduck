@@ -253,6 +253,11 @@ pub struct Policy {
 }
 
 impl Policy {
+    /// Identity of the loaded walking network, not a path that may since have changed.
+    pub fn walk_digest(&self) -> &[u8; 32] {
+        &self.walk.digest
+    }
+
     /// Load, validate and warm up.
     ///
     /// `stand` is optional: without it the walking policy runs at every velocity, which is

@@ -1,0 +1,583 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-01",
+  "platform": "aarch64",
+  "build_profile": "debug",
+  "scope": "Development-host simulation; no physical robot or acoustic calibration. Historical design iterations remain in Git history.",
+  "audio_fixtures": [
+    {
+      "case": "clicks",
+      "analysis_max_ms": 15.920092,
+      "analysis_p99_ms": 13.715305,
+      "duration_s": 16.0,
+      "first_lock_s": null,
+      "locked_frames": 0,
+      "total_frames": 500
+    },
+    {
+      "case": "motor",
+      "analysis_max_ms": 21.701063,
+      "analysis_p99_ms": 13.8786,
+      "duration_s": 16.0,
+      "first_lock_s": null,
+      "locked_frames": 0,
+      "total_frames": 500
+    },
+    {
+      "case": "music-120",
+      "analysis_max_ms": 19.045368,
+      "analysis_p99_ms": 13.986215999999999,
+      "duration_s": 16.0,
+      "first_lock_s": 3.936,
+      "locked_frames": 378,
+      "total_frames": 500,
+      "median_bpm": 120.00746594490573,
+      "phase_error_p95_ms": 10.061197982809134
+    },
+    {
+      "case": "music-150",
+      "analysis_max_ms": 14.702179,
+      "analysis_p99_ms": 14.034135999999998,
+      "duration_s": 16.0,
+      "first_lock_s": 3.936,
+      "locked_frames": 378,
+      "total_frames": 500,
+      "median_bpm": 150.0125795393463,
+      "phase_error_p95_ms": 10.048129571215725
+    },
+    {
+      "case": "music-90",
+      "analysis_max_ms": 14.378694,
+      "analysis_p99_ms": 13.902648,
+      "duration_s": 16.0,
+      "first_lock_s": 3.936,
+      "locked_frames": 378,
+      "total_frames": 500,
+      "median_bpm": 89.89064013602612,
+      "phase_error_p95_ms": 23.849586153765756
+    },
+    {
+      "case": "noise",
+      "analysis_max_ms": 15.310656,
+      "analysis_p99_ms": 15.11061,
+      "duration_s": 16.0,
+      "first_lock_s": null,
+      "locked_frames": 0,
+      "total_frames": 500
+    },
+    {
+      "case": "silence",
+      "analysis_max_ms": 14.867619,
+      "analysis_p99_ms": 13.812042,
+      "duration_s": 16.0,
+      "first_lock_s": null,
+      "locked_frames": 0,
+      "total_frames": 500
+    }
+  ],
+  "extra_negative": {
+    "source": "https://storage.googleapis.com/audioset/speech_whistling2.wav",
+    "result": {
+      "case": "speech",
+      "analysis_max_ms": 18.820177,
+      "analysis_p99_ms": 17.144064,
+      "duration_s": 4.92,
+      "first_lock_s": null,
+      "locked_frames": 0,
+      "total_frames": 154
+    }
+  },
+  "baseline": {
+    "revision": "d4df3b6",
+    "quarter_note_footwork": {
+      "target": "One alternating footfall per detected quarter-note beat, without eighth-note/triplet fallback",
+      "phase_feedback": "Kinematic sole landings follow the measured physical head pulse, independently scored against music",
+      "foot_tolerance_ms": 70,
+      "quarter_note_diagnostic_note": "70 ms includes one 10 ms analysis hop over the earlier 60 ms diagnostic. Raw errors remain reported; cadence/extra-step/alternation requirements are unchanged.",
+      "previous_eighth_note_regression": {
+        "steps_per_beat": 1,
+        "expected_steps": 34,
+        "actual_steps": 68,
+        "median_interval_beats": 0.49724425860083,
+        "coverage": 1.0,
+        "precision": 0.5,
+        "p95_error_ms": 251.35973724798376,
+        "alternating_fraction": 1.0,
+        "tolerance_ms": 70.0,
+        "estimated_playback_latency_ms": 80
+      },
+      "runs": [
+        {
+          "case": "Generated 90 BPM",
+          "duration_s": 24,
+          "feet": {
+            "left": {
+              "max_clearance_mm": 9.061191124310376,
+              "air_fraction": 0.04829308909242298,
+              "landing_count": 18
+            },
+            "right": {
+              "max_clearance_mm": 7.93273422903437,
+              "air_fraction": 0.04412989175686927,
+              "landing_count": 18
+            },
+            "path": {
+              "span_xy_m": [
+                0.11783295557585499,
+                0.0956452125528933
+              ],
+              "max_radius_m": 0.13115669334413152,
+              "minor_axis_rms_m": 0.011948033096643053,
+              "perpendicular_p95_m": 0.02125681493242329,
+              "minor_variance_fraction": 0.08593231684429291
+            },
+            "rhythm": {
+              "steps_per_beat": 1,
+              "expected_steps": 32,
+              "actual_steps": 32,
+              "median_interval_beats": 0.9927517978867727,
+              "coverage": 1.0,
+              "precision": 1.0,
+              "p95_error_ms": 33.93164483585824,
+              "alternating_fraction": 1.0,
+              "tolerance_ms": 70.0,
+              "estimated_playback_latency_ms": 80
+            }
+          },
+          "head": {
+            "reference_bpm": 90.00255689082076,
+            "reference_beats": 33,
+            "physical_nods": 33,
+            "beat_coverage_90ms": 1.0,
+            "median_offset_ms": -22.14801574999825,
+            "median_abs_error_ms": 22.14801574999825,
+            "p95_abs_error_ms": 42.3075409500008,
+            "clock": "source monotonic timestamps plus estimated ALSA output latency",
+            "estimated_playback_latency_ms": 80
+          },
+          "motion": {
+            "duration_s": 24.0,
+            "frames": 401,
+            "body_roll_span_deg": 11.75521619581956,
+            "body_pitch_span_deg": 5.392030121459373,
+            "head_pitch_span_deg": 19.900532663934186,
+            "head_yaw_span_deg": 28.491210125886976,
+            "trunk_height_span_mm": 6.859169387504735,
+            "minimum_trunk_height_m": 0.10991437162001527,
+            "max_tilt_deg": 6.416455928207797,
+            "fallen_frames": 0,
+            "picked_up_frames": 0,
+            "trunk_x_span_m": 0.11783295557585499,
+            "trunk_y_span_m": 0.0956452125528933,
+            "max_radius_m": 0.13115669334413152
+          }
+        },
+        {
+          "case": "Generated 150 BPM",
+          "duration_s": 24,
+          "feet": {
+            "left": {
+              "max_clearance_mm": 9.108301160428244,
+              "air_fraction": 0.09825145711906745,
+              "landing_count": 29
+            },
+            "right": {
+              "max_clearance_mm": 9.055413600875038,
+              "air_fraction": 0.10824313072439634,
+              "landing_count": 30
+            },
+            "path": {
+              "span_xy_m": [
+                0.2770977010370468,
+                0.10695362200832356
+              ],
+              "max_radius_m": 0.28196666003134757,
+              "minor_axis_rms_m": 0.014487786843628314,
+              "perpendicular_p95_m": 0.02711047466510761,
+              "minor_variance_fraction": 0.029417666262944064
+            },
+            "rhythm": {
+              "steps_per_beat": 1,
+              "expected_steps": 54,
+              "actual_steps": 54,
+              "median_interval_beats": 1.0009825646509385,
+              "coverage": 0.9629629629629629,
+              "precision": 0.9629629629629629,
+              "p95_error_ms": 64.4778061335101,
+              "alternating_fraction": 1.0,
+              "tolerance_ms": 70.0,
+              "estimated_playback_latency_ms": 80
+            }
+          },
+          "head": {
+            "reference_bpm": 150.00027056325848,
+            "reference_beats": 55,
+            "physical_nods": 55,
+            "beat_coverage_90ms": 1.0,
+            "median_offset_ms": -22.725038750003534,
+            "median_abs_error_ms": 22.725038750003534,
+            "p95_abs_error_ms": 33.1749480500001,
+            "clock": "source monotonic timestamps plus estimated ALSA output latency",
+            "estimated_playback_latency_ms": 80
+          },
+          "motion": {
+            "duration_s": 24.0,
+            "frames": 401,
+            "body_roll_span_deg": 12.877950234154437,
+            "body_pitch_span_deg": 6.282002744462535,
+            "head_pitch_span_deg": 9.028201524643762,
+            "head_yaw_span_deg": 30.915292256563568,
+            "trunk_height_span_mm": 8.580338792621934,
+            "minimum_trunk_height_m": 0.10927623519390785,
+            "max_tilt_deg": 6.971270817950641,
+            "fallen_frames": 0,
+            "picked_up_frames": 0,
+            "trunk_x_span_m": 0.274762462837257,
+            "trunk_y_span_m": 0.10695362200832356,
+            "max_radius_m": 0.28196666003134757
+          }
+        },
+        {
+          "case": "Owner MP3, middle steady passage",
+          "duration_s": 24,
+          "feet": {
+            "left": {
+              "max_clearance_mm": 9.689412142236495,
+              "air_fraction": 0.05164514785506039,
+              "landing_count": 17
+            },
+            "right": {
+              "max_clearance_mm": 7.522014422576483,
+              "air_fraction": 0.044148271553519365,
+              "landing_count": 17
+            },
+            "path": {
+              "span_xy_m": [
+                0.14925294023570132,
+                0.08452066603668325
+              ],
+              "max_radius_m": 0.15675050322381603,
+              "minor_axis_rms_m": 0.013099569125588765,
+              "perpendicular_p95_m": 0.026920814243187922,
+              "minor_variance_fraction": 0.06148241132836127
+            },
+            "rhythm": {
+              "steps_per_beat": 1,
+              "expected_steps": 27,
+              "actual_steps": 27,
+              "median_interval_beats": 0.982719338953846,
+              "coverage": 0.9629629629629629,
+              "precision": 0.9629629629629629,
+              "p95_error_ms": 63.785458155325614,
+              "alternating_fraction": 1.0,
+              "tolerance_ms": 70.0,
+              "estimated_playback_latency_ms": 80
+            }
+          },
+          "head": {
+            "reference_bpm": 122.89375441428705,
+            "reference_beats": 28,
+            "physical_nods": 33,
+            "beat_coverage_90ms": 1.0,
+            "median_offset_ms": -11.879323499996985,
+            "median_abs_error_ms": 16.85437437499715,
+            "p95_abs_error_ms": 47.17212353749787,
+            "clock": "source monotonic timestamps plus estimated ALSA output latency",
+            "estimated_playback_latency_ms": 80
+          },
+          "motion": {
+            "duration_s": 24.0,
+            "frames": 401,
+            "body_roll_span_deg": 12.963785119558786,
+            "body_pitch_span_deg": 6.3830081195312385,
+            "head_pitch_span_deg": 17.04892964426061,
+            "head_yaw_span_deg": 29.56318507854184,
+            "trunk_height_span_mm": 9.317543018082672,
+            "minimum_trunk_height_m": 0.10844110541888938,
+            "max_tilt_deg": 7.624733122431747,
+            "fallen_frames": 0,
+            "picked_up_frames": 0,
+            "trunk_x_span_m": 0.1492529402357013,
+            "trunk_y_span_m": 0.08452066603668326,
+            "max_radius_m": 0.15675050322381603
+          }
+        },
+        {
+          "case": "Generated 120 BPM",
+          "duration_s": 24,
+          "feet": {
+            "left": {
+              "max_clearance_mm": 9.285481156907785,
+              "air_fraction": 0.07160699417152373,
+              "landing_count": 24
+            },
+            "right": {
+              "max_clearance_mm": 7.798897861303019,
+              "air_fraction": 0.06452955870108243,
+              "landing_count": 24
+            },
+            "path": {
+              "span_xy_m": [
+                0.2320996424159277,
+                0.10269142881899276
+              ],
+              "max_radius_m": 0.23956207187392,
+              "minor_axis_rms_m": 0.012376959063673459,
+              "perpendicular_p95_m": 0.02288615005776412,
+              "minor_variance_fraction": 0.03274594130461044
+            },
+            "rhythm": {
+              "steps_per_beat": 1,
+              "expected_steps": 43,
+              "actual_steps": 43,
+              "median_interval_beats": 0.9956812891180921,
+              "coverage": 0.9767441860465116,
+              "precision": 0.9767441860465116,
+              "p95_error_ms": 65.16712516022166,
+              "alternating_fraction": 1.0,
+              "tolerance_ms": 70.0,
+              "estimated_playback_latency_ms": 80
+            }
+          },
+          "head": {
+            "reference_bpm": 120.00372104561383,
+            "reference_beats": 44,
+            "physical_nods": 44,
+            "beat_coverage_90ms": 1.0,
+            "median_offset_ms": -42.98298062499839,
+            "median_abs_error_ms": 42.98298062499839,
+            "p95_abs_error_ms": 52.92792289999788,
+            "clock": "source monotonic timestamps plus estimated ALSA output latency",
+            "estimated_playback_latency_ms": 80
+          },
+          "motion": {
+            "duration_s": 24.0,
+            "frames": 401,
+            "body_roll_span_deg": 11.545075340328156,
+            "body_pitch_span_deg": 6.1472006918702835,
+            "head_pitch_span_deg": 17.408988506262965,
+            "head_yaw_span_deg": 30.560446082624175,
+            "trunk_height_span_mm": 7.867763010296097,
+            "minimum_trunk_height_m": 0.10981637825943287,
+            "max_tilt_deg": 6.466038901435975,
+            "fallen_frames": 0,
+            "picked_up_frames": 0,
+            "trunk_x_span_m": 0.23209964241592768,
+            "trunk_y_span_m": 0.10269142881899276,
+            "max_radius_m": 0.23956207187392
+          }
+        }
+      ],
+      "lifecycle": {
+        "synthetic_120_bpm": "Passed music fade, manual takeover/resumption, disable and restart persistence with motors disabled after restart",
+        "evidence": "final-controls.log"
+      },
+      "clock_qualification": "Estimated 80 ms ALSA offset; simulation measurements, not acoustic loopback or physical-robot acceptance."
+    },
+    "portable_demo": {
+      "workspace_tests": {
+        "passed": 1913,
+        "ignored": 29,
+        "filtered": [
+          "an_unloadable_policy_holds_the_pose_and_reports_why",
+          "setting_a_skill_keeps_what_the_call_left_out"
+        ]
+      },
+      "rust_toolchain": "1.94.1",
+      "workspace_check": "passed",
+      "format_check": "passed",
+      "yamnet_reference_parity": "passed",
+      "simulator_revision": "bae39f5900b318f7e87fc485c30a31213cfa14eb",
+      "policy_hub_revision": "665ae4eb20bfe13bca1ef4ea6d4bb6b4a096e448",
+      "policy_sha256": "2fc7f8ee6acd7d0d3f66a99927b5d5a56589aeed02ec714de329b252d5ccf492",
+      "source_audio_sha256": "4b8216ff0d3540da159ad791431dd29c1e6be7c971a5aadaba84dbe8e6079034",
+      "source_start_seconds": 80,
+      "observation_seconds": 24,
+      "audio_latency_caveat": "Playback assumes an estimated 80 ms output delay; silent mode scores against the zero-delay source clock. This is not acoustic calibration.",
+      "audible": {
+        "result": "passed",
+        "footwork": {
+          "left": {
+            "max_clearance_mm": 10.144898935029131,
+            "air_fraction": 0.052872606161532054
+          },
+          "right": {
+            "max_clearance_mm": 7.42190906338336,
+            "air_fraction": 0.04412989175686927
+          },
+          "path": {
+            "span_xy_m": [
+              0.16080298329489096,
+              0.0962144004034511
+            ],
+            "max_radius_m": 0.16018367063204053,
+            "minor_axis_rms_m": 0.014860378345947722,
+            "perpendicular_p95_m": 0.03004030652667469,
+            "minor_variance_fraction": 0.06635581426002517
+          },
+          "rhythm": {
+            "steps_per_beat": 1,
+            "expected_steps": 28,
+            "actual_steps": 28,
+            "median_interval_beats": 0.991312722982106,
+            "coverage": 0.9642857142857143,
+            "precision": 0.9642857142857143,
+            "p95_error_ms": 54.511144795280764,
+            "alternating_fraction": 1.0,
+            "tolerance_ms": 70.0,
+            "estimated_playback_latency_ms": 80
+          }
+        },
+        "head_rhythm": {
+          "reference_bpm": 122.90491518753608,
+          "reference_beats": 29,
+          "physical_nods": 34,
+          "beat_coverage_90ms": 1.0,
+          "median_offset_ms": -27.76850199999714,
+          "median_abs_error_ms": 27.76850199999714,
+          "p95_abs_error_ms": 53.75186760902934,
+          "clock": "source monotonic timestamps plus estimated ALSA output latency",
+          "estimated_playback_latency_ms": 80
+        }
+      },
+      "silent": {
+        "result": "absolute foot timing failed; movement checks passed",
+        "footwork": {
+          "left": {
+            "max_clearance_mm": 9.866540522935804,
+            "air_fraction": 0.05412156536219817
+          },
+          "right": {
+            "max_clearance_mm": 7.455757077756013,
+            "air_fraction": 0.041631973355537054
+          },
+          "path": {
+            "span_xy_m": [
+              0.14764263553501328,
+              0.07181229763396413
+            ],
+            "max_radius_m": 0.1478817079144106,
+            "minor_axis_rms_m": 0.01666448184622359,
+            "perpendicular_p95_m": 0.03185062144006042,
+            "minor_variance_fraction": 0.11286581349565981
+          },
+          "rhythm": {
+            "steps_per_beat": 1,
+            "expected_steps": 27,
+            "actual_steps": 27,
+            "median_interval_beats": 0.9923122148094687,
+            "coverage": 0.5555555555555556,
+            "precision": 0.5555555555555556,
+            "p95_error_ms": 125.49026457255295,
+            "alternating_fraction": 1.0,
+            "tolerance_ms": 70.0,
+            "estimated_playback_latency_ms": 0
+          }
+        },
+        "head_rhythm": {
+          "reference_bpm": 122.89375441428705,
+          "reference_beats": 28,
+          "physical_nods": 33,
+          "beat_coverage_90ms": 1.0,
+          "median_offset_ms": 59.849429250000696,
+          "median_abs_error_ms": 59.849429250000696,
+          "p95_abs_error_ms": 80.12298048750246,
+          "clock": "source monotonic timestamps plus estimated ALSA output latency",
+          "estimated_playback_latency_ms": 0
+        }
+      }
+    }
+  },
+  "review_checks": {
+    "rust_toolchain": "1.94.1",
+    "workspace_tests": {
+      "passed": 1917,
+      "failed": 0,
+      "ignored": 31,
+      "filtered": 0
+    },
+    "workspace_check": "passed",
+    "workspace_clippy_all_targets_deny_warnings": "passed",
+    "rust_format": "passed",
+    "python_lint_format": "passed",
+    "dev_push_shell_syntax": "passed",
+    "explicit_onnx_tests": {
+      "passed": 3,
+      "cases": [
+        "exported_model_matches_tensorflow_reference",
+        "music_model_recovers_while_petting_keeps_capture_alive",
+        "a_failing_classifier_does_not_close_the_other_consumer"
+      ]
+    },
+    "regressions": [
+      "music-loss phase progression and area reset",
+      "loaded-model SHA-256 compatibility pin",
+      "unloadable/invalid audio consumer isolation and music retry",
+      "valid skill-edit fixture and fallback-path diagnostic"
+    ],
+    "incompatible_standing_network": "Refused with unsupported_walk_policy; no dance acquired",
+    "lifecycle": {
+      "result": "passed: fade, reacquire, manual takeover/resume, disable, persistence; motors disabled after restart",
+      "footwork": {
+        "left": {
+          "max_clearance_mm": 9.77647463024419,
+          "air_fraction": 0.07663473552686381
+        },
+        "right": {
+          "max_clearance_mm": 7.24016886200628,
+          "air_fraction": 0.06330695543523532
+        },
+        "path": {
+          "span_xy_m": [
+            0.22788321159662325,
+            0.11116716952574827
+          ],
+          "max_radius_m": 0.2306995003003027,
+          "minor_axis_rms_m": 0.011615686484407573,
+          "perpendicular_p95_m": 0.02190515214519001,
+          "minor_variance_fraction": 0.028718339092208858
+        },
+        "rhythm": {
+          "steps_per_beat": 1,
+          "expected_steps": 43,
+          "actual_steps": 43,
+          "median_interval_beats": 0.9907721751931178,
+          "coverage": 0.9767441860465116,
+          "precision": 0.9767441860465116,
+          "p95_error_ms": 64.86221315257868,
+          "alternating_fraction": 1.0,
+          "tolerance_ms": 70.0,
+          "estimated_playback_latency_ms": 80
+        }
+      },
+      "head_rhythm": {
+        "reference_bpm": 119.99289682640352,
+        "reference_beats": 44,
+        "physical_nods": 44,
+        "beat_coverage_90ms": 1.0,
+        "median_offset_ms": -9.432300124997184,
+        "median_abs_error_ms": 10.177075624998366,
+        "p95_abs_error_ms": 24.08372667499563,
+        "clock": "source monotonic timestamps plus estimated ALSA output latency",
+        "estimated_playback_latency_ms": 80
+      },
+      "motion": {
+        "duration_s": 24.0,
+        "frames": 401,
+        "body_roll_span_deg": 11.846997028923703,
+        "body_pitch_span_deg": 6.412724303155635,
+        "head_pitch_span_deg": 17.864384647361398,
+        "head_yaw_span_deg": 30.152616445913363,
+        "trunk_height_span_mm": 8.1013504587783,
+        "minimum_trunk_height_m": 0.10989292614078316,
+        "max_tilt_deg": 6.599124679695813,
+        "fallen_frames": 0,
+        "picked_up_frames": 0,
+        "trunk_x_span_m": 0.2220065682731691,
+        "trunk_y_span_m": 0.11116716952574826,
+        "max_radius_m": 0.23069950030030273
+      }
+    },
+    "test_run_note": "An initial concurrent run hit the existing updater IPC progress timing test (missing Swapping); the final complete workspace run passed unfiltered without concurrent simulation workloads."
+  }
+}
