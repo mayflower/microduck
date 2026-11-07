@@ -173,7 +173,7 @@ beats; they do not promise recognition of every track, quiet passage or syncopat
 
 ## Wire contract and installation
 
-API version 48 adds `robot.dance` and `robot.dance.set {"enabled":true|false}`. Both are slow-lane
+API version 51 adds `robot.dance` and `robot.dance.set {"enabled":true|false}`. Both are slow-lane
 robotd calls. The setter returns `IntentResult`, including a refusal if saving fails. The read
 returns `enabled`, `state`, optional `bpm` and optional `reason`. States are `disabled`, `waiting`,
 `acquiring` and `dancing`; waiting reasons include `initializing`, `robot_not_ready`,
