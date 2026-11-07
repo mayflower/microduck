@@ -164,7 +164,7 @@ model completion and player spawn are not playback completion.
 
 ## RPC and beak ownership
 
-API v50 adds typed `robot.say` with `{ "text": "Hello, human." }`, routed and authorized like
+API v51 adds typed `robot.say` with `{ "text": "Hello, human." }`, routed and authorized like
 `robot.sound`. Install matching daemons, CLI and transports together. `robotctl say TEXT`
 prints intent acceptance; `--json` returns the normal `IntentResult`. Disabled speech, invalid
 text, a worker that is not ready, busy/unsafe audio and an occupied request slot are immediate
